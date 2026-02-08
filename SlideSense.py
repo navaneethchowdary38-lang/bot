@@ -10,7 +10,7 @@ from langchain.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 import asyncio
 from PIL import Image
-from transformers import BlipProcessor, BlipForConditionalGeneration
+from transformers import BlipProcessor, BlipForQuestionAnswering
 import time
 
 # -------------------- Page Config --------------------
@@ -27,34 +27,36 @@ login_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_jcikwtu
 ai_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_qp1q7mct.json")
 upload_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_ysrn2iwp.json")
 
-# -------------------- Session --------------------
+# -------------------- Session Defaults --------------------
 defaults = {
     "chat_history": [],
     "vector_db": None,
     "authenticated": False,
     "users": {"admin": "admin123"}
 }
-for k,v in defaults.items():
+
+for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
 # -------------------- Typing Effect --------------------
-def type_text(text, speed=0.02):
-    container = st.empty()
+def type_text(text, speed=0.03):
+    box = st.empty()
     typed = ""
     for c in text:
         typed += c
-        container.markdown(f"### {typed}")
+        box.markdown(f"### {typed}")
         time.sleep(speed)
 
-# -------------------- Auth UI --------------------
+# -------------------- Authentication UI --------------------
 def login_ui():
-    col1, col2 = st.columns([1,1])
+    col1, col2 = st.columns(2)
 
     with col1:
         st_lottie(login_anim, height=300)
+
     with col2:
-        type_text("🔐 Welcome to SlideSense", 0.05)
+        type_text("🔐 Welcome to SlideSense")
         st.markdown("### AI Powered Learning Platform")
 
         tab1, tab2 = st.tabs(["Login", "Sign Up"])
@@ -80,19 +82,19 @@ def login_ui():
                     st.session_state.users[nu] = np
                     st.success("Account created 🎉")
 
-# -------------------- BLIP --------------------
+# -------------------- Load BLIP VQA --------------------
 @st.cache_resource
-def load_blip():
-    processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+def load_blip_vqa():
+    processor = BlipProcessor.from_pretrained("Salesforce/blip-vqa-base")
+    model = BlipForQuestionAnswering.from_pretrained("Salesforce/blip-vqa-base")
     return processor, model
 
-processor, blip_model = load_blip()
+processor, blip_vqa_model = load_blip_vqa()
 
-def describe_image(image):
-    inputs = processor(image, return_tensors="pt")
-    out = blip_model.generate(**inputs)
-    return processor.decode(out[0], skip_special_tokens=True)
+def answer_image_question(image, question):
+    inputs = processor(image, question, return_tensors="pt")
+    output = blip_vqa_model.generate(**inputs)
+    return processor.decode(output[0], skip_special_tokens=True)
 
 # -------------------- Auth Check --------------------
 if not st.session_state.authenticated:
@@ -106,38 +108,40 @@ if st.sidebar.button("Logout"):
         st.session_state[k] = defaults[k]
     st.rerun()
 
-page = st.sidebar.radio("Mode", ["📘 PDF Analyzer", "🖼 Image Recognition"])
+page = st.sidebar.radio("Mode", ["📘 PDF Analyzer", "🖼 Image Q&A"])
 
 st.sidebar.markdown("### 💬 History")
-for q,a in st.session_state.chat_history[-8:]:
+for q, a in st.session_state.chat_history[-6:]:
     st.sidebar.markdown(f"- {q[:30]}")
 
 # -------------------- Hero --------------------
-col1, col2 = st.columns([1,2])
+col1, col2 = st.columns([1, 2])
 with col1:
-    st_lottie(ai_anim, height=260)
+    st_lottie(ai_anim, height=250)
 with col2:
-    type_text("📘 SlideSense AI Platform", 0.03)
+    type_text("📘 SlideSense AI Platform")
     st.markdown("### Smart Learning | Smart Vision | Smart AI")
+
 st.divider()
 
-# -------------------- PDF Analyzer --------------------
+# -------------------- PDF ANALYZER --------------------
 if page == "📘 PDF Analyzer":
     st_lottie(upload_anim, height=180)
     pdf = st.file_uploader("Upload PDF", type="pdf")
 
     if pdf:
         if st.session_state.vector_db is None:
-            with st.spinner("🧠 AI is processing your document..."):
-                st_lottie(ai_anim, height=120)
-
+            with st.spinner("🧠 Processing PDF..."):
                 reader = PdfReader(pdf)
                 text = ""
-                for p in reader.pages:
-                    if p.extract_text():
-                        text += p.extract_text()+"\n"
+                for page in reader.pages:
+                    if page.extract_text():
+                        text += page.extract_text() + "\n"
 
-                splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=80)
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=500,
+                    chunk_overlap=80
+                )
                 chunks = splitter.split_text(text)
 
                 try:
@@ -145,22 +149,22 @@ if page == "📘 PDF Analyzer":
                 except:
                     asyncio.set_event_loop(asyncio.new_event_loop())
 
-                embeddings = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')
+                embeddings = HuggingFaceEmbeddings(
+                    model_name="sentence-transformers/all-MiniLM-L6-v2"
+                )
+
                 st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
 
         st.success("PDF Ready 🚀")
-
         q = st.text_input("Ask your question")
 
         if q:
-            with st.spinner("🤖 AI is thinking..."):
-                st_lottie(ai_anim, height=120)
-
+            with st.spinner("🤖 AI Thinking..."):
                 docs = st.session_state.vector_db.similarity_search(q, k=5)
                 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
 
                 history = ""
-                for x,y in st.session_state.chat_history[-5:]:
+                for x, y in st.session_state.chat_history[-5:]:
                     history += f"Q:{x}\nA:{y}\n"
 
                 prompt = ChatPromptTemplate.from_template("""
@@ -179,28 +183,34 @@ Rules:
 """)
 
                 chain = create_stuff_documents_chain(llm, prompt)
-                res = chain.invoke({"context":docs,"question":q,"history":history})
+                res = chain.invoke({
+                    "context": docs,
+                    "question": q,
+                    "history": history
+                })
 
-                st.session_state.chat_history.append((q,res))
+                st.session_state.chat_history.append((q, res))
 
         st.markdown("## 💬 AI Conversation")
-        for q,a in st.session_state.chat_history:
+        for q, a in st.session_state.chat_history:
             st.markdown(f"🧑 **You:** {q}")
-            time.sleep(0.15)
             st.markdown(f"🤖 **AI:** {a}")
             st.divider()
 
-# -------------------- Image Recognition --------------------
-if page == "🖼 Image Recognition":
+# -------------------- IMAGE QUESTION ANSWERING --------------------
+if page == "🖼 Image Q&A":
     st_lottie(upload_anim, height=180)
-    img_file = st.file_uploader("Upload Image", type=["png","jpg","jpeg"])
+    img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
 
     if img_file:
-        img = Image.open(img_file)
+        img = Image.open(img_file).convert("RGB")
         st.image(img, use_column_width=True)
 
-        with st.spinner("🤖 AI Vision Processing..."):
-            st_lottie(ai_anim, height=120)
-            desc = describe_image(img)
+        question = st.text_input("Ask a question about the image")
 
-        st.success(desc)
+        if question:
+            with st.spinner("🤖 Analyzing image..."):
+                st_lottie(ai_anim, height=120)
+                answer = answer_image_question(img, question)
+
+            st.success(answer)
