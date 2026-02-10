@@ -24,8 +24,8 @@ def load_lottie(url):
     return r.json()
 
 login_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_jcikwtux.json")
-ai_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_qp1q7mct.json")
-#upload_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_ysrn2iwp.json")
+#ai_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_qp1q7mct.json")
+upload_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_ysrn2iwp.json")
 
 # -------------------- Session Defaults --------------------
 defaults = {
