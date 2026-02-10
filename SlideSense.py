@@ -24,7 +24,7 @@ def load_lottie(url):
     return r.json()
 
 login_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_jcikwtux.json")
-#ai_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_qp1q7mct.json")
+ai_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_qp1q7mct.json")
 upload_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_ysrn2iwp.json")
 
 # -------------------- Session Defaults --------------------
@@ -159,7 +159,7 @@ st.divider()
 
 # -------------------- PDF ANALYZER --------------------
 if page == "📘 PDF Analyzer":
-    st_lottie(upload_anim, height=180)
+    #st_lottie(upload_anim, height=180)
     pdf = st.file_uploader("Upload PDF", type="pdf")
 
     if pdf:
