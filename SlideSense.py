@@ -91,10 +91,43 @@ def load_blip_vqa():
 
 processor, blip_vqa_model = load_blip_vqa()
 
+# -------------------- UPDATED IMAGE Q&A (OPTION-1) --------------------
 def answer_image_question(image, question):
+    # Step 1: BLIP short answer
     inputs = processor(image, question, return_tensors="pt")
-    output = blip_vqa_model.generate(**inputs)
-    return processor.decode(output[0], skip_special_tokens=True)
+
+    output = blip_vqa_model.generate(
+        **inputs,
+        max_length=10,
+        num_beams=5,
+        early_stopping=True
+    )
+
+    short_answer = processor.decode(
+        output[0],
+        skip_special_tokens=True
+    )
+
+    # Step 2: Expand using Gemini (text-only)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+
+    expansion_prompt = f"""
+You are expanding a visual answer.
+
+Image Question:
+{question}
+
+Vision Model Answer:
+{short_answer}
+
+Task:
+- Convert this into a clear, complete sentence.
+- Do NOT add extra details.
+- Keep it simple and accurate.
+"""
+
+    final_answer = llm.invoke(expansion_prompt)
+    return final_answer.content
 
 # -------------------- Auth Check --------------------
 if not st.session_state.authenticated:
