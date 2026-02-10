@@ -232,7 +232,7 @@ Rules:
 
 # -------------------- IMAGE QUESTION ANSWERING --------------------
 if page == "🖼 Image Q&A":
-    st_lottie(upload_anim, height=180)
+    #st_lottie(upload_anim, height=180)
     img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
 
     if img_file:
