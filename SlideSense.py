@@ -25,7 +25,7 @@ def load_lottie(url):
 
 login_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_jcikwtux.json")
 ai_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_qp1q7mct.json")
-upload_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_ysrn2iwp.json")
+#upload_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_ysrn2iwp.json")
 
 # -------------------- Session Defaults --------------------
 defaults = {
@@ -123,7 +123,7 @@ Vision Model Answer:
 Task:
 - Convert this into a clear, complete sentence.
 - Do NOT add extra details.
-- Keep it simple and accurate.
+- Keep accurate.
 """
 
     final_answer = llm.invoke(expansion_prompt)
