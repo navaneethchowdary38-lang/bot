@@ -125,24 +125,20 @@ def login_ui():
 # -------------------- IMAGE Q&A --------------------
 def answer_image_question(image, question):
     processor, model, device = load_blip()
+
     inputs = processor(image, question, return_tensors="pt").to(device)
 
-    outputs = model.generate(**inputs, max_length=10, num_beams=5)
-    short_answer = processor.decode(outputs[0], skip_special_tokens=True)
+    outputs = model.generate(
+        **inputs,
+        max_length=20,
+        num_beams=5,
+        early_stopping=True
+    )
 
-    llm = load_llm()
+    answer = processor.decode(outputs[0], skip_special_tokens=True)
 
-    prompt = f"""
-You are an AI assistant.
+    return answer
 
-Question: {question}
-Vision Answer: {short_answer}
-
-Convert into one clear and grammatically correct sentence.
-Do not add extra information.
-"""
-
-    return llm.invoke(prompt).content
 
 
 # -------------------- AUTH CHECK --------------------
@@ -280,19 +276,14 @@ If answer is not in context, say:
 
 
 # ==================== IMAGE Q&A ====================
-# -------------------- IMAGE Q&A --------------------
-def answer_image_question(image, question):
-    processor, model, device = load_blip()
+if mode == "🖼 Image Q&A":
+    img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
 
-    inputs = processor(image, question, return_tensors="pt").to(device)
+    if img_file:
+        img = Image.open(img_file).convert("RGB")
+        st.image(img, use_column_width=True)
 
-    outputs = model.generate(
-        **inputs,
-        max_length=20,
-        num_beams=5,
-        early_stopping=True
-    )
-
-    answer = processor.decode(outputs[0], skip_special_tokens=True)
-
-    return answer
+        question = st.text_input("Ask a question about the image")
+        if question:
+            with st.spinner("Analyzing image..."):
+                st.success(answer_image_question(img, question))
