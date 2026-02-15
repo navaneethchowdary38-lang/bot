@@ -1,7 +1,6 @@
 import streamlit as st
 from streamlit_lottie import st_lottie
-import requests, os, time, hashlib, sqlite3
-from datetime import datetime
+import requests, json, os, time, hashlib
 from PyPDF2 import PdfReader
 from PIL import Image
 import torch
@@ -18,107 +17,22 @@ from transformers import BlipProcessor, BlipForQuestionAnswering
 
 # -------------------- CONFIG --------------------
 st.set_page_config(page_title="SlideSense", page_icon="📘", layout="wide")
-
-DB_FILE = "slidesense.db"
-
-
-# -------------------- DATABASE --------------------
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            password TEXT
-        )
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS chat_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            mode TEXT,
-            question TEXT,
-            answer TEXT,
-            timestamp TEXT
-        )
-    """)
-
-    conn.commit()
-    conn.close()
-
-
-init_db()
-
-
-def register_user(username, password_hash):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    try:
-        c.execute("INSERT INTO users (username, password) VALUES (?, ?)",
-                  (username, password_hash))
-        conn.commit()
-        return True
-    except:
-        return False
-    finally:
-        conn.close()
-
-
-def authenticate_user(username, password_hash):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-
-    c.execute("SELECT id FROM users WHERE username=? AND password=?",
-              (username, password_hash))
-
-    result = c.fetchone()
-    conn.close()
-
-    return result[0] if result else None
-
-
-def save_chat(user_id, mode, question, answer):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-
-    c.execute("""
-        INSERT INTO chat_history (user_id, mode, question, answer, timestamp)
-        VALUES (?, ?, ?, ?, ?)
-    """, (user_id, mode, question, answer, datetime.now().isoformat()))
-
-    conn.commit()
-    conn.close()
-
-
-def load_chat_history(user_id, mode):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-
-    c.execute("""
-        SELECT question, answer
-        FROM chat_history
-        WHERE user_id=? AND mode=?
-        ORDER BY id DESC
-    """, (user_id, mode))
-
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
-
-def clear_chat_history(user_id, mode):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("DELETE FROM chat_history WHERE user_id=? AND mode=?",
-              (user_id, mode))
-    conn.commit()
-    conn.close()
+USERS_FILE = "users.json"
 
 
 # -------------------- HELPERS --------------------
+def load_users():
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE) as f:
+            return json.load(f)
+    return {}
+
+
+def save_users(users):
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f)
+
+
 def hash_password(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
@@ -155,15 +69,19 @@ def load_blip():
 
 
 # -------------------- SESSION DEFAULTS --------------------
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
+defaults = {
+    "authenticated": False,
+    "users": load_users(),
+    "vector_db": None,
+    "pdf_chat_history": [],
+    "image_chat_history": [],
+    "current_pdf_id": None
+}
 
-if "username" not in st.session_state:
-    st.session_state.username = None
 
-if "user_id" not in st.session_state:
-    st.session_state.user_id = None
-
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 
 # -------------------- AUTH UI --------------------
@@ -184,13 +102,10 @@ def login_ui():
         with tab1:
             u = st.text_input("Username")
             p = st.text_input("Password", type="password")
-
             if st.button("Login"):
-                user_id = authenticate_user(u, hash_password(p))
-                if user_id:
+                if u in st.session_state.users and \
+                   st.session_state.users[u] == hash_password(p):
                     st.session_state.authenticated = True
-                    st.session_state.user_id = user_id
-                    st.session_state.username = u
                     st.rerun()
                 else:
                     st.error("Invalid credentials")
@@ -198,42 +113,82 @@ def login_ui():
         with tab2:
             nu = st.text_input("New Username")
             np = st.text_input("New Password", type="password")
-
             if st.button("Create Account"):
-                if register_user(nu, hash_password(np)):
-                    st.success("Account created 🎉")
-                else:
+                if nu in st.session_state.users:
                     st.warning("User already exists")
+                else:
+                    st.session_state.users[nu] = hash_password(np)
+                    save_users(st.session_state.users)
+                    st.success("Account created")
+
+
+# -------------------- IMAGE Q&A --------------------
+def answer_image_question(image, question):
+    processor, model, device = load_blip()
+    inputs = processor(image, question, return_tensors="pt").to(device)
+
+    outputs = model.generate(**inputs, max_length=10, num_beams=5)
+    short_answer = processor.decode(outputs[0], skip_special_tokens=True)
+
+    try:
+        llm = load_llm()
+
+        prompt = f"""
+You are an AI assistant.
+
+Question: {question}
+Vision Answer: {short_answer}
+
+Convert into one clear and grammatically correct sentence.
+Do not add extra information.
+"""
+
+        response = llm.invoke(prompt)
+        return response.content
+
+    except Exception as e:
+        # 🔥 Fallback if Gemini quota exceeded
+        return f"(Basic Answer) {short_answer}"
 
 
 # -------------------- AUTH CHECK --------------------
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
 if not st.session_state.authenticated:
     login_ui()
     st.stop()
 
-
 # -------------------- SIDEBAR --------------------
-if st.session_state.username:
-    st.sidebar.success(f"Logged in as {st.session_state.username} ✅")
+st.sidebar.success("Logged in ✅")
 
 if st.sidebar.button("Logout"):
     st.session_state.authenticated = False
+    st.session_state.logged_user = None
     st.rerun()
 
 mode = st.sidebar.radio("Mode", ["📘 PDF Analyzer", "🖼 Image Q&A"])
 
-history = load_chat_history(st.session_state.user_id,
-                            "PDF" if mode == "📘 PDF Analyzer" else "IMAGE")
+st.sidebar.markdown("### 💬 Recent Questions")
+
+if mode == "📘 PDF Analyzer":
+    history = st.session_state.pdf_chat_history
+else:
+    history = st.session_state.image_chat_history
 
 if history:
-    st.sidebar.markdown("### 💬 Recent Questions")
-    for q, _ in history[:5]:
+    for q, _ in reversed(history[-5:]):
         st.sidebar.markdown(f"- {q[:40]}...")
 
     if st.sidebar.button("🧹 Clear Chat History"):
-        clear_chat_history(st.session_state.user_id,
-                           "PDF" if mode == "📘 PDF Analyzer" else "IMAGE")
+        if mode == "📘 PDF Analyzer":
+            st.session_state.pdf_chat_history = []
+        else:
+            st.session_state.image_chat_history = []
         st.rerun()
+else:
+    st.sidebar.caption("No history yet")
+
 
 
 # -------------------- HERO --------------------
@@ -258,7 +213,14 @@ if mode == "📘 PDF Analyzer":
     pdf = st.file_uploader("Upload PDF", type="pdf")
 
     if pdf:
-        if "vector_db" not in st.session_state:
+        pdf_id = f"{pdf.name}_{pdf.size}"
+
+        if st.session_state.current_pdf_id != pdf_id:
+            st.session_state.current_pdf_id = pdf_id
+            st.session_state.vector_db = None
+            st.session_state.chat_history = []
+
+        if st.session_state.vector_db is None:
             with st.spinner("📄 Processing PDF..."):
                 reader = PdfReader(pdf)
                 text = ""
@@ -274,6 +236,7 @@ if mode == "📘 PDF Analyzer":
                 )
 
                 chunks = splitter.split_text(text)
+
                 embeddings = load_embeddings()
                 st.session_state.vector_db = FAISS.from_texts(
                     chunks, embeddings
@@ -288,6 +251,8 @@ if mode == "📘 PDF Analyzer":
                 llm = load_llm()
 
                 prompt = ChatPromptTemplate.from_template("""
+You are a helpful AI assistant.
+
 Use ONLY the context below to answer.
 
 Context:
@@ -296,7 +261,7 @@ Context:
 Question:
 {question}
 
-If answer is not found, say:
+If answer is not in context, say:
 "Information not found in the document."
 """)
 
@@ -309,9 +274,10 @@ If answer is not found, say:
                 answer = response.get("output_text", "") \
                     if isinstance(response, dict) else response
 
-                save_chat(st.session_state.user_id, "PDF", question, answer)
+                st.session_state.pdf_chat_history.append((question, answer))
 
-    for q, a in history:
+    # -------- CHAT DISPLAY --------
+    for q, a in reversed(st.session_state.pdf_chat_history):
         with st.chat_message("user"):
             st.markdown(q)
 
@@ -321,26 +287,13 @@ If answer is not found, say:
 
 # ==================== IMAGE Q&A ====================
 if mode == "🖼 Image Q&A":
-
     img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
 
     if img_file:
         img = Image.open(img_file).convert("RGB")
         st.image(img, use_column_width=True)
 
-        question = st.chat_input("Ask a question about the image")
-
+        question = st.text_input("Ask a question about the image")
         if question:
-            processor, model, device = load_blip()
-            inputs = processor(img, question, return_tensors="pt").to(device)
-            outputs = model.generate(**inputs, max_length=20, num_beams=5)
-            answer = processor.decode(outputs[0], skip_special_tokens=True)
-
-            save_chat(st.session_state.user_id, "IMAGE", question, answer)
-
-    for q, a in history:
-        with st.chat_message("user"):
-            st.markdown(q)
-
-        with st.chat_message("assistant"):
-            st.markdown(a)
+            with st.spinner("Analyzing image..."):
+                st.success(answer_image_question(img, question))
