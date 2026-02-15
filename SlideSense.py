@@ -155,17 +155,23 @@ if not st.session_state.authenticated:
 st.sidebar.success("Logged in ✅")
 
 if st.sidebar.button("Logout"):
-    st.cache_resource.clear()
-    for k in defaults:
-        st.session_state[k] = defaults[k]
+    st.session_state.authenticated = False
+    st.session_state.logged_user = None
     st.rerun()
 
 mode = st.sidebar.radio("Mode", ["📘 PDF Analyzer", "🖼 Image Q&A"])
 
 st.sidebar.markdown("### 💬 Recent Questions")
 
-for q, _ in reversed(st.session_state.chat_history[-5:]):
-    st.sidebar.markdown(f"- {q[:40]}...")
+if st.session_state.chat_history:
+    for q, _ in reversed(st.session_state.chat_history[-5:]):
+        st.sidebar.markdown(f"- {q[:40]}...")
+
+    if st.sidebar.button("🧹 Clear Chat History"):
+        st.session_state.chat_history = []
+        st.rerun()
+else:
+    st.sidebar.caption("No history yet")
 
 
 # -------------------- HERO --------------------
