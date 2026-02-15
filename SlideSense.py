@@ -144,10 +144,12 @@ Do not add extra information.
 
 
 # -------------------- AUTH CHECK --------------------
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
 if not st.session_state.authenticated:
     login_ui()
     st.stop()
-
 
 # -------------------- SIDEBAR --------------------
 st.sidebar.success("Logged in ✅")
