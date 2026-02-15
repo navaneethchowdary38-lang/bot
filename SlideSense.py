@@ -188,19 +188,26 @@ if page == "📘 PDF Analyzer":
 
                 st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
 
-        st.success("PDF Ready 🚀")
-        q = st.text_input("Ask your question")
+st.success("PDF Ready 🚀")
+q = st.text_input("Ask your question", key="pdf_question")
 
-        if q:
-            with st.spinner("🤖 AI Thinking..."):
-                docs = st.session_state.vector_db.similarity_search(q, k=5)
-                llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+if q:
+    with st.spinner("🤖 AI Thinking..."):
 
-                history = ""
-                for x, y in st.session_state.chat_history[-5:]:
-                    history += f"Q:{x}\nA:{y}\n"
+        docs = st.session_state.vector_db.similarity_search(q, k=5)
 
-                prompt = ChatPromptTemplate.from_template("""
+        context_text = "\n\n".join([doc.page_content for doc in docs])
+
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            temperature=0.4
+        )
+
+        history = ""
+        for x, y in st.session_state.chat_history[-5:]:
+            history += f"Q:{x}\nA:{y}\n"
+
+        prompt = ChatPromptTemplate.from_template("""
 History:
 {history}
 
@@ -215,14 +222,15 @@ Rules:
 - If not found say: Information not found in the document
 """)
 
-                chain = create_stuff_documents_chain(llm, prompt)
-                res = chain.invoke({
-                    "context": docs,
-                    "question": q,
-                    "history": history
-                })
+        chain = create_stuff_documents_chain(llm, prompt)
 
-                st.session_state.chat_history.append((q, res))
+        res = chain.invoke({
+            "context": context_text,
+            "question": q,
+            "history": history
+        })
+
+        st.session_state.chat_history.append((q, res))
 
         st.markdown("## 💬 AI Conversation")
         for q, a in st.session_state.chat_history:
