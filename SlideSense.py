@@ -168,7 +168,9 @@ with col2:
 st.divider()
 
 # ==================== PDF ANALYZER ====================
+# ==================== PDF ANALYZER ====================
 if mode == "📘 PDF Analyzer":
+
     pdf = st.file_uploader("Upload PDF", type="pdf", key="pdf_uploader")
 
     if pdf:
@@ -197,13 +199,17 @@ if mode == "📘 PDF Analyzer":
                     chunk_size=500,
                     chunk_overlap=80
                 )
+
                 chunks = splitter.split_text(text)
 
                 embeddings = HuggingFaceEmbeddings(
                     model_name="sentence-transformers/all-MiniLM-L6-v2"
                 )
 
-                st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
+                st.session_state.vector_db = FAISS.from_texts(
+                    chunks,
+                    embeddings
+                )
 
         q = st.text_input("Ask a question")
 
@@ -226,18 +232,16 @@ Rules:
             chain = create_stuff_documents_chain(llm, prompt)
             res = chain.invoke({"context": docs, "question": q})
 
-            if isinstance(res, dict):
-                answer = res.get("output_text", "")
-            else:
-                answer = res
+            answer = res.get("output_text", "") if isinstance(res, dict) else res
 
             st.session_state.chat_history.append((q, answer))
 
-        # -------- CHAT DISPLAY (QUESTION ON TOP, ANSWER BELOW) --------
+        # -------- CHAT DISPLAY --------
         st.markdown("## 💬 Conversation")
 
         chat_container = st.container()
-with chat_container:
+
+        with chat_container:
             for uq, ua in reversed(st.session_state.chat_history):
                 st.markdown(f"🧑 **You:** {uq}")
                 st.markdown(f"🤖 **AI:** {ua}")
