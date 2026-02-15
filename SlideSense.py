@@ -280,24 +280,19 @@ If answer is not in context, say:
 
 
 # ==================== IMAGE Q&A ====================
-if mode == "🖼 Image Q&A":
+# -------------------- IMAGE Q&A --------------------
+def answer_image_question(image, question):
+    processor, model, device = load_blip()
 
-    img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
+    inputs = processor(image, question, return_tensors="pt").to(device)
 
-    if img_file:
-        img = Image.open(img_file).convert("RGB")
-        st.image(img, use_column_width=True)
+    outputs = model.generate(
+        **inputs,
+        max_length=20,
+        num_beams=5,
+        early_stopping=True
+    )
 
-        question = st.chat_input("Ask a question about the image")
+    answer = processor.decode(outputs[0], skip_special_tokens=True)
 
-        if question:
-            with st.spinner("🤖 Analyzing image..."):
-                answer = answer_image_question(img, question)
-                st.session_state.image_chat_history.append((question, answer))
-
-    for q, a in reversed(st.session_state.image_chat_history):
-        with st.chat_message("user"):
-            st.markdown(q)
-
-        with st.chat_message("assistant"):
-            st.markdown(a)
+    return answer
