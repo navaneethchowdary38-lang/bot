@@ -73,9 +73,11 @@ defaults = {
     "authenticated": False,
     "users": load_users(),
     "vector_db": None,
-    "chat_history": [],
+    "pdf_chat_history": [],
+    "image_chat_history": [],
     "current_pdf_id": None
 }
+
 
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -163,15 +165,24 @@ mode = st.sidebar.radio("Mode", ["📘 PDF Analyzer", "🖼 Image Q&A"])
 
 st.sidebar.markdown("### 💬 Recent Questions")
 
-if st.session_state.chat_history:
-    for q, _ in reversed(st.session_state.chat_history[-5:]):
+if mode == "📘 PDF Analyzer":
+    history = st.session_state.pdf_chat_history
+else:
+    history = st.session_state.image_chat_history
+
+if history:
+    for q, _ in reversed(history[-5:]):
         st.sidebar.markdown(f"- {q[:40]}...")
 
     if st.sidebar.button("🧹 Clear Chat History"):
-        st.session_state.chat_history = []
+        if mode == "📘 PDF Analyzer":
+            st.session_state.pdf_chat_history = []
+        else:
+            st.session_state.image_chat_history = []
         st.rerun()
 else:
     st.sidebar.caption("No history yet")
+
 
 
 # -------------------- HERO --------------------
@@ -257,10 +268,10 @@ If answer is not in context, say:
                 answer = response.get("output_text", "") \
                     if isinstance(response, dict) else response
 
-                st.session_state.chat_history.append((question, answer))
+                st.session_state.pdf_chat_history.append((question, answer))
 
     # -------- CHAT DISPLAY --------
-    for q, a in reversed(st.session_state.chat_history):
+    for q, a in reversed(st.session_state.pdf_chat_history):
         with st.chat_message("user"):
             st.markdown(q)
 
@@ -282,9 +293,9 @@ if mode == "🖼 Image Q&A":
         if question:
             with st.spinner("🤖 Analyzing image..."):
                 answer = answer_image_question(img, question)
-                st.session_state.chat_history.append((question, answer))
+                st.session_state.image_chat_history.append((question, answer))
 
-    for q, a in reversed(st.session_state.chat_history):
+    for q, a in reversed(st.session_state.image_chat_history):
         with st.chat_message("user"):
             st.markdown(q)
 
