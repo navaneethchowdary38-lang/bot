@@ -1,63 +1,88 @@
 import streamlit as st
 from streamlit_lottie import st_lottie
-import requests
+import requests, json, os, time, hashlib
 from PyPDF2 import PdfReader
+from PIL import Image
+import torch
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
-import asyncio
-from PIL import Image
+
 from transformers import BlipProcessor, BlipForQuestionAnswering
-import time
 
-# -------------------- Page Config --------------------
+# -------------------- CONFIG --------------------
 st.set_page_config(page_title="SlideSense", page_icon="📘", layout="wide")
+USERS_FILE = "users.json"
 
-# -------------------- Lottie Loader --------------------
+# -------------------- HELPERS --------------------
+def load_users():
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE) as f:
+            return json.load(f)
+    return {}
+
+def save_users(users):
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f)
+
+def hash_password(pw):
+    return hashlib.sha256(pw.encode()).hexdigest()
+
 def load_lottie(url):
     r = requests.get(url)
-    if r.status_code != 200:
-        return None
-    return r.json()
+    return r.json() if r.status_code == 200 else None
 
-login_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_jcikwtux.json")
-ai_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_qp1q7mct.json")
-upload_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_ysrn2iwp.json")
+def type_text(text, speed=0.03):
+    box = st.empty()
+    out = ""
+    for c in text:
+        out += c
+        box.markdown(f"### {out}")
+        time.sleep(speed)
 
-# -------------------- Session Defaults --------------------
+# -------------------- CACHED MODELS --------------------
+@st.cache_resource
+def load_llm():
+    return ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+
+@st.cache_resource
+def load_blip():
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    processor = BlipProcessor.from_pretrained("Salesforce/blip-vqa-base")
+    model = BlipForQuestionAnswering.from_pretrained(
+        "Salesforce/blip-vqa-base"
+    ).to(device)
+    return processor, model, device
+
+# -------------------- SESSION DEFAULTS --------------------
 defaults = {
-    "chat_history": [],
-    "vector_db": None,
     "authenticated": False,
-    "users": {"admin": "admin123"}
+    "users": load_users(),
+    "vector_db": None,
+    "chat_history": [],
+    "current_pdf_id": None
 }
 
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# -------------------- Typing Effect --------------------
-def type_text(text, speed=0.03):
-    box = st.empty()
-    typed = ""
-    for c in text:
-        typed += c
-        box.markdown(f"### {typed}")
-        time.sleep(speed)
-
-# -------------------- Authentication UI --------------------
+# -------------------- AUTH UI --------------------
 def login_ui():
     col1, col2 = st.columns(2)
 
     with col1:
-        st_lottie(login_anim, height=300)
+        st_lottie(
+            load_lottie("https://assets10.lottiefiles.com/packages/lf20_jcikwtux.json"),
+            height=300
+        )
 
     with col2:
         type_text("🔐 Welcome to SlideSense")
-        st.markdown("### AI Powered Learning Platform")
 
         tab1, tab2 = st.tabs(["Login", "Sign Up"])
 
@@ -65,12 +90,11 @@ def login_ui():
             u = st.text_input("Username")
             p = st.text_input("Password", type="password")
             if st.button("Login"):
-                if u in st.session_state.users and st.session_state.users[u] == p:
-                    st.success("Login Successful 🚀")
+                if u in st.session_state.users and st.session_state.users[u] == hash_password(p):
                     st.session_state.authenticated = True
                     st.rerun()
                 else:
-                    st.error("Invalid credentials ❌")
+                    st.error("Invalid credentials")
 
         with tab2:
             nu = st.text_input("New Username")
@@ -79,177 +103,148 @@ def login_ui():
                 if nu in st.session_state.users:
                     st.warning("User already exists")
                 else:
-                    st.session_state.users[nu] = np
-                    st.success("Account created 🎉")
+                    st.session_state.users[nu] = hash_password(np)
+                    save_users(st.session_state.users)
+                    st.success("Account created")
 
-# -------------------- Load BLIP VQA --------------------
-@st.cache_resource
-def load_blip_vqa():
-    processor = BlipProcessor.from_pretrained("Salesforce/blip-vqa-base")
-    model = BlipForQuestionAnswering.from_pretrained("Salesforce/blip-vqa-base")
-    return processor, model
-
-processor, blip_vqa_model = load_blip_vqa()
-
-# -------------------- UPDATED IMAGE Q&A (OPTION-1) --------------------
+# -------------------- IMAGE Q&A --------------------
 def answer_image_question(image, question):
-    # Step 1: BLIP short answer
-    inputs = processor(image, question, return_tensors="pt")
+    processor, model, device = load_blip()
+    inputs = processor(image, question, return_tensors="pt").to(device)
 
-    output = blip_vqa_model.generate(
-        **inputs,
-        max_length=10,
-        num_beams=5,
-        early_stopping=True
-    )
+    outputs = model.generate(**inputs, max_length=10, num_beams=5)
+    short_answer = processor.decode(outputs[0], skip_special_tokens=True)
 
-    short_answer = processor.decode(
-        output[0],
-        skip_special_tokens=True
-    )
-
-    # Step 2: Expand using Gemini (text-only)
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
-
-    expansion_prompt = f"""
-You are expanding a visual answer.
-
-Image Question:
-{question}
-
-Vision Model Answer:
-{short_answer}
-
-Task:
-- Convert this into a clear, complete sentence.
-- Do NOT add extra details.
-- Keep accurate.
+    llm = load_llm()
+    prompt = f"""
+Question: {question}
+Vision Answer: {short_answer}
+Convert into one clear sentence. No extra details.
 """
+    return llm.invoke(prompt).content
 
-    final_answer = llm.invoke(expansion_prompt)
-    return final_answer.content
-
-# -------------------- Auth Check --------------------
+# -------------------- AUTH CHECK --------------------
 if not st.session_state.authenticated:
     login_ui()
     st.stop()
 
-# -------------------- Sidebar --------------------
+# -------------------- SIDEBAR --------------------
 st.sidebar.success("Logged in ✅")
+
 if st.sidebar.button("Logout"):
+    st.cache_resource.clear()
     for k in defaults:
         st.session_state[k] = defaults[k]
     st.rerun()
 
-page = st.sidebar.radio("Mode", ["📘 PDF Analyzer", "🖼 Image Q&A"])
+mode = st.sidebar.radio("Mode", ["📘 PDF Analyzer", "🖼 Image Q&A"])
 
-st.sidebar.markdown("### 💬 History")
-for q, a in st.session_state.chat_history[-6:]:
-    st.sidebar.markdown(f"- {q[:30]}")
+# -------------------- SIDEBAR HISTORY --------------------
+st.sidebar.markdown("### 💬 Chat History")
 
-# -------------------- Hero --------------------
+if st.session_state.chat_history:
+    for i, (q, _) in enumerate(st.session_state.chat_history[-5:], start=1):
+        st.sidebar.markdown(f"{i}. {q[:40]}...")
+
+    if st.sidebar.button("🧹 Clear History"):
+        st.session_state.chat_history = []
+        st.rerun()
+else:
+    st.sidebar.caption("No history yet")
+
+# -------------------- HERO --------------------
 col1, col2 = st.columns([1, 2])
+
 with col1:
-    st_lottie(ai_anim, height=250)
+    st_lottie(
+        load_lottie("https://assets10.lottiefiles.com/packages/lf20_qp1q7mct.json"),
+        height=250
+    )
+
 with col2:
     type_text("📘 SlideSense AI Platform")
     st.markdown("### Smart Learning | Smart Vision | Smart AI")
 
 st.divider()
 
-# -------------------- PDF ANALYZER --------------------
-# -------------------- PDF ANALYZER --------------------
-if page == "📘 PDF Analyzer":
-
-    pdf = st.file_uploader("Upload PDF", type="pdf")
+# ==================== PDF ANALYZER ====================
+if mode == "📘 PDF Analyzer":
+    pdf = st.file_uploader("Upload PDF", type="pdf", key="pdf_uploader")
 
     if pdf:
+        pdf_id = f"{pdf.name}_{pdf.size}"
+
+        if st.session_state.current_pdf_id != pdf_id:
+            st.session_state.current_pdf_id = pdf_id
+            st.session_state.vector_db = None
+            st.session_state.chat_history = []
 
         if st.session_state.vector_db is None:
-            with st.spinner("🧠 Processing PDF..."):
-
+            with st.spinner("Processing PDF..."):
                 reader = PdfReader(pdf)
                 text = ""
 
-                for page_obj in reader.pages:
-                    extracted = page_obj.extract_text()
+                for pdf_page in reader.pages:
+                    extracted = pdf_page.extract_text()
                     if extracted:
                         text += extracted + "\n"
+
+                if not text.strip():
+                    st.error("No readable text found in PDF")
+                    st.stop()
 
                 splitter = RecursiveCharacterTextSplitter(
                     chunk_size=500,
                     chunk_overlap=80
                 )
-
                 chunks = splitter.split_text(text)
 
                 embeddings = HuggingFaceEmbeddings(
                     model_name="sentence-transformers/all-MiniLM-L6-v2"
                 )
 
-                st.session_state.vector_db = FAISS.from_texts(
-                    chunks,
-                    embeddings
-                )
+                st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
 
-        st.success("PDF Ready 🚀")
-
-        q = st.text_input("Ask your question", key="pdf_question")
+        q = st.text_input("Ask a question")
 
         if q:
-            with st.spinner("🤖 AI Thinking..."):
+            llm = load_llm()
+            docs = st.session_state.vector_db.similarity_search(q, k=5)
 
-                docs = st.session_state.vector_db.similarity_search(q, k=5)
-
-                # Build history text manually
-                history_text = ""
-                for old_q, old_a in st.session_state.chat_history[-5:]:
-                    history_text += f"Q: {old_q}\nA: {old_a}\n"
-
-                llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.5-flash",
-                    temperature=0.4
-                )
-
-                prompt = ChatPromptTemplate.from_template("""
-You are a helpful AI assistant.
-
-Previous Conversation:
-{history}
-
-Document Context:
+            prompt = ChatPromptTemplate.from_template("""
+Context:
 {context}
 
-User Question:
+Question:
 {question}
 
 Rules:
-- Answer only from the document context.
-- If answer is not present, say:
-  "Information not found in the document."
-- Do not repeat previous answers unless relevant.
+- Answer only from document
+- If not found say: Information not found in the document
 """)
 
-                chain = create_stuff_documents_chain(llm, prompt)
+            chain = create_stuff_documents_chain(llm, prompt)
+            res = chain.invoke({"context": docs, "question": q})
 
-                response = chain.invoke({
-                    "context": docs,   # IMPORTANT: pass docs directly
-                    "question": q,
-                    "history": history_text
-                })
+            if isinstance(res, dict):
+                answer = res.get("output_text", "")
+            else:
+                answer = res
 
-                st.session_state.chat_history.append((q, response))
+            st.session_state.chat_history.append((q, answer))
 
-        st.markdown("## 💬 AI Conversation")
+        # -------- CHAT DISPLAY (QUESTION ON TOP, ANSWER BELOW) --------
+        st.markdown("## 💬 Conversation")
 
-        for user_q, ai_a in st.session_state.chat_history:
-            st.markdown(f"🧑 **You:** {user_q}")
-            st.markdown(f"🤖 **AI:** {ai_a}")
-            st.divider()
+        chat_container = st.container()
+        with chat_container:
+            for uq, ua in st.session_state.chat_history:
+                st.markdown(f"🧑 **You:** {uq}")
+                st.markdown(f"🤖 **AI:** {ua}")
+                st.divider()
 
-# -------------------- IMAGE QUESTION ANSWERING --------------------
-if page == "🖼 Image Q&A":
-    #st_lottie(upload_anim, height=180)
+# ==================== IMAGE Q&A ====================
+if mode == "🖼 Image Q&A":
     img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
 
     if img_file:
@@ -257,10 +252,6 @@ if page == "🖼 Image Q&A":
         st.image(img, use_column_width=True)
 
         question = st.text_input("Ask a question about the image")
-
         if question:
-            with st.spinner("🤖 Analyzing image..."):
-                st_lottie(ai_anim, height=120)
-                answer = answer_image_question(img, question)
-
-            st.success(answer)
+            with st.spinner("Analyzing image..."):
+                st.success(answer_image_question(img, question))
