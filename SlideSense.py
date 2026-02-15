@@ -237,7 +237,7 @@ Rules:
         st.markdown("## 💬 Conversation")
 
         chat_container = st.container()
-       with chat_container:
+    with chat_container:
     for uq, ua in st.session_state.chat_history:
         st.markdown(f"🧑 **You:** {uq}")
         st.markdown(f"🤖 **AI:** {ua}")
