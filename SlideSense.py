@@ -130,13 +130,25 @@ def answer_image_question(image, question):
     outputs = model.generate(**inputs, max_length=10, num_beams=5)
     short_answer = processor.decode(outputs[0], skip_special_tokens=True)
 
-    llm = load_llm()
-    prompt = f"""
+    try:
+        llm = load_llm()
+
+        prompt = f"""
+You are an AI assistant.
+
 Question: {question}
 Vision Answer: {short_answer}
-Convert into one clear sentence. No extra details.
+
+Convert into one clear and grammatically correct sentence.
+Do not add extra information.
 """
-    return llm.invoke(prompt).content
+
+        response = llm.invoke(prompt)
+        return response.content
+
+    except Exception as e:
+        # 🔥 Fallback if Gemini quota exceeded
+        return f"(Basic Answer) {short_answer}"
 
 
 # -------------------- AUTH CHECK --------------------
