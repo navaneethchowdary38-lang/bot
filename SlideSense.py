@@ -158,84 +158,93 @@ with col2:
 st.divider()
 
 # -------------------- PDF ANALYZER --------------------
+# -------------------- PDF ANALYZER --------------------
 if page == "📘 PDF Analyzer":
-    #st_lottie(upload_anim, height=180)
+
     pdf = st.file_uploader("Upload PDF", type="pdf")
 
     if pdf:
+
         if st.session_state.vector_db is None:
             with st.spinner("🧠 Processing PDF..."):
+
                 reader = PdfReader(pdf)
                 text = ""
-                for page in reader.pages:
-                    if page.extract_text():
-                        text += page.extract_text() + "\n"
+
+                for page_obj in reader.pages:
+                    extracted = page_obj.extract_text()
+                    if extracted:
+                        text += extracted + "\n"
 
                 splitter = RecursiveCharacterTextSplitter(
                     chunk_size=500,
                     chunk_overlap=80
                 )
-                chunks = splitter.split_text(text)
 
-                try:
-                    asyncio.get_running_loop()
-                except:
-                    asyncio.set_event_loop(asyncio.new_event_loop())
+                chunks = splitter.split_text(text)
 
                 embeddings = HuggingFaceEmbeddings(
                     model_name="sentence-transformers/all-MiniLM-L6-v2"
                 )
 
-                st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
+                st.session_state.vector_db = FAISS.from_texts(
+                    chunks,
+                    embeddings
+                )
 
-st.success("PDF Ready 🚀")
-q = st.text_input("Ask your question", key="pdf_question")
+        st.success("PDF Ready 🚀")
 
-if q:
-    with st.spinner("🤖 AI Thinking..."):
+        q = st.text_input("Ask your question", key="pdf_question")
 
-        docs = st.session_state.vector_db.similarity_search(q, k=5)
+        if q:
+            with st.spinner("🤖 AI Thinking..."):
 
-        context_text = "\n\n".join([doc.page_content for doc in docs])
+                docs = st.session_state.vector_db.similarity_search(q, k=5)
 
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            temperature=0.4
-        )
+                # Build history text manually
+                history_text = ""
+                for old_q, old_a in st.session_state.chat_history[-5:]:
+                    history_text += f"Q: {old_q}\nA: {old_a}\n"
 
-        history = ""
-        for x, y in st.session_state.chat_history[-5:]:
-            history += f"Q:{x}\nA:{y}\n"
+                llm = ChatGoogleGenerativeAI(
+                    model="gemini-2.5-flash",
+                    temperature=0.4
+                )
 
-        prompt = ChatPromptTemplate.from_template("""
-History:
+                prompt = ChatPromptTemplate.from_template("""
+You are a helpful AI assistant.
+
+Previous Conversation:
 {history}
 
-Context:
+Document Context:
 {context}
 
-Question:
+User Question:
 {question}
 
 Rules:
-- Answer only from document
-- If not found say: Information not found in the document
+- Answer only from the document context.
+- If answer is not present, say:
+  "Information not found in the document."
+- Do not repeat previous answers unless relevant.
 """)
 
-        chain = create_stuff_documents_chain(llm, prompt)
+                chain = create_stuff_documents_chain(llm, prompt)
 
-        res = chain.invoke({
-            "context": context_text,
-            "question": q,
-            "history": history
-        })
+                response = chain.invoke({
+                    "context": docs,   # IMPORTANT: pass docs directly
+                    "question": q,
+                    "history": history_text
+                })
 
-        st.session_state.chat_history.append((q, res))
+                st.session_state.chat_history.append((q, response))
 
         st.markdown("## 💬 AI Conversation")
-        for q, a in st.session_state.chat_history:
-            st.markdown(f"🧑 **You:** {q}")
-            st.markdown(f"🤖 **AI:** {a}")
+
+        for user_q, ai_a in st.session_state.chat_history:
+            st.markdown(f"🧑 **You:** {user_q}")
+            st.markdown(f"🤖 **AI:** {ai_a}")
             st.divider()
 
 # -------------------- IMAGE QUESTION ANSWERING --------------------
