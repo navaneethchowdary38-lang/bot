@@ -158,6 +158,13 @@ def load_blip():
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
+if "username" not in st.session_state:
+    st.session_state.username = None
+
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
+
+
 
 # -------------------- AUTH UI --------------------
 def login_ui():
@@ -206,7 +213,8 @@ if not st.session_state.authenticated:
 
 
 # -------------------- SIDEBAR --------------------
-st.sidebar.success(f"Logged in as {st.session_state.username} ✅")
+if st.session_state.username:
+    st.sidebar.success(f"Logged in as {st.session_state.username} ✅")
 
 if st.sidebar.button("Logout"):
     st.session_state.authenticated = False
