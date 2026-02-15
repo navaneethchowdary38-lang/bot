@@ -125,20 +125,18 @@ def login_ui():
 # -------------------- IMAGE Q&A --------------------
 def answer_image_question(image, question):
     processor, model, device = load_blip()
-
     inputs = processor(image, question, return_tensors="pt").to(device)
 
-    outputs = model.generate(
-        **inputs,
-        max_length=20,
-        num_beams=5,
-        early_stopping=True
-    )
+    outputs = model.generate(**inputs, max_length=10, num_beams=5)
+    short_answer = processor.decode(outputs[0], skip_special_tokens=True)
 
-    answer = processor.decode(outputs[0], skip_special_tokens=True)
-
-    return answer
-
+    llm = load_llm()
+    prompt = f"""
+Question: {question}
+Vision Answer: {short_answer}
+Convert into one clear sentence. No extra details.
+"""
+    return llm.invoke(prompt).content
 
 
 # -------------------- AUTH CHECK --------------------
