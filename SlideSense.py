@@ -169,7 +169,7 @@ if not st.session_state.authenticated:
 
 
 # -------------------- SIDEBAR --------------------
-st.sidebar.success(f"Logged in as {st.session_state.username} ✅")
+st.sidebar.success(f"""Logged in as {st.session_state.username} ✅""")
 
 if st.sidebar.button("Logout"):
     st.session_state.authenticated = False
