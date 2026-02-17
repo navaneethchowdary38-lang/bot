@@ -169,7 +169,7 @@ if not st.session_state.authenticated:
 
 
 # -------------------- SIDEBAR --------------------
-st.sidebar.success(f"""Logged in as {st.session_state.username} ✅""")
+st.sidebar.success(f"Logged in as {st.session_state.username} ✅")
 
 if st.sidebar.button("Logout"):
     st.session_state.authenticated = False
@@ -269,9 +269,6 @@ If answer is not found, say:
 
                 save_chat(st.session_state.user_id, "PDF", question, answer)
 
-            st.rerun()   # ✅ CORRECT POSITION
-
-
     for q, a in history:
         with st.chat_message("user"):
             st.markdown(q)
@@ -298,11 +295,8 @@ if mode == "🖼 Image Q&A":
 
             save_chat(st.session_state.user_id, "IMAGE", question, answer)
 
-            st.rerun()   # ✅ CORRECT POSITION
-
-
     for q, a in history:
         with st.chat_message("user"):
             st.markdown(q)
         with st.chat_message("assistant"):
-            st.markdown(a)    update the full code
+            st.markdown(a)
