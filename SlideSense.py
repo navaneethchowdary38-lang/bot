@@ -268,6 +268,8 @@ If answer is not found, say:
                     if isinstance(response, dict) else response
 
                 save_chat(st.session_state.user_id, "PDF", question, answer)
+st.rerun()
+
 
     for q, a in history:
         with st.chat_message("user"):
@@ -294,6 +296,8 @@ if mode == "🖼 Image Q&A":
             answer = processor.decode(outputs[0], skip_special_tokens=True)
 
             save_chat(st.session_state.user_id, "IMAGE", question, answer)
+st.rerun()
+
 
     for q, a in history:
         with st.chat_message("user"):
