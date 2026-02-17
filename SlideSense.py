@@ -169,4 +169,134 @@ if not st.session_state.authenticated:
 
 
 # -------------------- SIDEBAR --------------------
-st.sidebar.success(f"Logged in
+st.sidebar.success(f"Logged in as {st.session_state.username} ✅")
+
+if st.sidebar.button("Logout"):
+    st.session_state.authenticated = False
+    st.rerun()
+
+mode = st.sidebar.radio("Mode", ["📘 PDF Analyzer", "🖼 Image Q&A"])
+
+history = load_chat_history(
+    st.session_state.user_id,
+    "PDF" if mode == "📘 PDF Analyzer" else "IMAGE"
+)
+
+if history:
+    st.sidebar.markdown("### 💬 Recent Questions")
+    for q, _ in history[:5]:
+        st.sidebar.markdown(f"- {q[:40]}...")
+
+    if st.sidebar.button("🧹 Clear Chat History"):
+        clear_chat_history(
+            st.session_state.user_id,
+            "PDF" if mode == "📘 PDF Analyzer" else "IMAGE"
+        )
+        st.rerun()
+
+
+# -------------------- HERO --------------------
+col1, col2 = st.columns([1, 2])
+
+with col1:
+    st_lottie(
+        load_lottie("https://assets10.lottiefiles.com/packages/lf20_qp1q7mct.json"),
+        height=250
+    )
+
+with col2:
+    st.markdown("# 📘 SlideSense AI")
+    st.markdown("### Smart Learning | Smart Vision | Smart AI")
+
+st.divider()
+
+
+# ==================== PDF ANALYZER ====================
+if mode == "📘 PDF Analyzer":
+
+    pdf = st.file_uploader("Upload PDF", type="pdf")
+
+    if pdf:
+        if "vector_db" not in st.session_state:
+            with st.spinner("📄 Processing PDF..."):
+                reader = PdfReader(pdf)
+                text = ""
+
+                for page in reader.pages:
+                    extracted = page.extract_text()
+                    if extracted:
+                        text += extracted + "\n"
+
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=400,
+                    chunk_overlap=60
+                )
+
+                chunks = splitter.split_text(text)
+                embeddings = load_embeddings()
+                st.session_state.vector_db = FAISS.from_texts(
+                    chunks, embeddings
+                )
+
+        question = st.chat_input("Ask a question about the PDF")
+
+        if question:
+            with st.spinner("🤖 Thinking..."):
+                docs = st.session_state.vector_db.similarity_search(question, k=4)
+                llm = load_llm()
+
+                prompt = ChatPromptTemplate.from_template("""
+Use ONLY the context below to answer.
+
+Context:
+{context}
+
+Question:
+{question}
+
+If answer is not found, say:
+"Information not found in the document."
+""")
+
+                chain = create_stuff_documents_chain(llm, prompt)
+                response = chain.invoke({
+                    "context": docs,
+                    "question": question
+                })
+
+                answer = response.get("output_text", "") \
+                    if isinstance(response, dict) else response
+
+                save_chat(st.session_state.user_id, "PDF", question, answer)
+
+    for q, a in history:
+        with st.chat_message("user"):
+            st.markdown(q)
+        with st.chat_message("assistant"):
+            st.markdown(a)
+
+
+# ==================== IMAGE Q&A ====================
+if mode == "🖼 Image Q&A":
+
+    img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
+
+    if img_file:
+        img = Image.open(img_file).convert("RGB")
+        st.image(img, use_column_width=True)
+
+        question = st.chat_input("Ask a question about the image")
+
+        if question:
+            processor, model, device = load_blip()
+            inputs = processor(img, question, return_tensors="pt").to(device)
+            outputs = model.generate(**inputs, max_length=20, num_beams=5)
+            answer = processor.decode(outputs[0], skip_special_tokens=True)
+
+            save_chat(st.session_state.user_id, "IMAGE", question, answer)
+
+    for q, a in history:
+        with st.chat_message("user"):
+            st.markdown(q)
+        with st.chat_message("assistant"):
+            st.markdown(a)
