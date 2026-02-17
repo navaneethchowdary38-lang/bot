@@ -268,7 +268,8 @@ If answer is not found, say:
                     if isinstance(response, dict) else response
 
                 save_chat(st.session_state.user_id, "PDF", question, answer)
-st.rerun()
+
+            st.rerun()   # ✅ CORRECT POSITION
 
 
     for q, a in history:
@@ -296,7 +297,8 @@ if mode == "🖼 Image Q&A":
             answer = processor.decode(outputs[0], skip_special_tokens=True)
 
             save_chat(st.session_state.user_id, "IMAGE", question, answer)
-st.rerun()
+
+            st.rerun()   # ✅ CORRECT POSITION
 
 
     for q, a in history:
