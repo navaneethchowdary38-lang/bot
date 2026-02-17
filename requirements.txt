@@ -12,3 +12,4 @@ langchain-huggingface==0.0.3
 sentence-transformers
 faiss-cpu
 streamlit-lottie
+supabase
