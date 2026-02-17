@@ -177,7 +177,7 @@ if not st.session_state.authenticated:
 # -------------------- SIDEBAR --------------------
 st.sidebar.success(f"Logged in as {st.session_state.username} ✅")
 
-if st.sidebar.button("Logout"):
+if st.sidebar.button("Logout", key="logout_button"):
     for key in ["authenticated", "user_id", "username", "is_admin"]:
         st.session_state[key] = None
     st.rerun()
