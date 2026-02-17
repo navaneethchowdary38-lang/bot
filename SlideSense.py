@@ -209,7 +209,6 @@ with col2:
 
 st.divider()
 
-
 # ==================== PDF ANALYZER ====================
 if mode == "📘 PDF Analyzer":
 
@@ -268,6 +267,9 @@ If answer is not found, say:
 
                 save_chat(st.session_state.user_id, "PDF", question, answer)
 
+            st.rerun()   # ✅ CORRECT POSITION
+
+
     for q, a in history:
         with st.chat_message("user"):
             st.markdown(q)
@@ -294,8 +296,12 @@ if mode == "🖼 Image Q&A":
 
             save_chat(st.session_state.user_id, "IMAGE", question, answer)
 
+            st.rerun()   # ✅ CORRECT POSITION
+
+
     for q, a in history:
         with st.chat_message("user"):
             st.markdown(q)
         with st.chat_message("assistant"):
             st.markdown(a)
+
