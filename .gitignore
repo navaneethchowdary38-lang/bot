@@ -1,3 +1,23 @@
-venv\
-.env
-simple_prac
+# Database
+local_store.db
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+
+# Streamlit
+.streamlit/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
