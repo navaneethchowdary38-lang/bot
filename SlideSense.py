@@ -177,6 +177,10 @@ if not st.session_state.authenticated:
                 st.session_state.user_id = user.uid
                 st.session_state.email = email
                 st.rerun()
+                st.divider()
+                st.subheader("Or login with Google")
+
+google_login()
             else:
                 st.error("User not found")
 
