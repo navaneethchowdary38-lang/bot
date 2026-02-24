@@ -218,8 +218,45 @@ def load_blip():
 
 
 # -------------------- MAIN CONTENT --------------------
+
 if st.session_state.current_chat_id:
 
+    # -------- PDF MODE --------
+    if st.session_state.mode == "PDF":
+
+        st.title("📘 PDF Analyzer")
+
+        pdf = st.file_uploader("Upload PDF", type="pdf")
+
+        if pdf and st.session_state.vector_db is None:
+            with st.spinner("Processing PDF..."):
+                reader = PdfReader(pdf)
+                text = ""
+
+                for page in reader.pages:
+                    extracted = page.extract_text()
+                    if extracted:
+                        text += extracted + "\n"
+
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=800,
+                    chunk_overlap=150
+                )
+
+                chunks = splitter.split_text(text)
+                embeddings = HuggingFaceEmbeddings(
+                    model_name="sentence-transformers/all-MiniLM-L6-v2"
+                )
+
+                st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
+
+    # -------- IMAGE MODE --------
+    if st.session_state.mode == "IMAGE":
+
+        st.title("🖼 Image Q&A")
+        img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
+
+    # -------- LOAD MESSAGES --------
     messages = load_messages(
         st.session_state.user_id,
         st.session_state.current_chat_id
@@ -231,6 +268,7 @@ if st.session_state.current_chat_id:
         else:
             st.markdown(f'<div class="chat-ai">🤖 {content}</div>', unsafe_allow_html=True)
 
+    # -------- CHAT INPUT --------
     question = st.chat_input("Ask something...")
 
     if question:
@@ -242,32 +280,11 @@ if st.session_state.current_chat_id:
             question
         )
 
-        # -------- PDF MODE --------
+        # PDF Answer
         if st.session_state.mode == "PDF":
-
-            pdf = st.file_uploader("Upload PDF", type="pdf")
-
-            if pdf:
-                if st.session_state.vector_db is None:
-                    reader = PdfReader(pdf)
-                    text = ""
-                    for page in reader.pages:
-                        extracted = page.extract_text()
-                        if extracted:
-                            text += extracted + "\n"
-
-                    splitter = RecursiveCharacterTextSplitter(
-                        chunk_size=800,
-                        chunk_overlap=150
-                    )
-
-                    chunks = splitter.split_text(text)
-                    embeddings = HuggingFaceEmbeddings(
-                        model_name="sentence-transformers/all-MiniLM-L6-v2"
-                    )
-
-                    st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
-
+            if st.session_state.vector_db is None:
+                answer = "Please upload a PDF first."
+            else:
                 docs = st.session_state.vector_db.similarity_search(question, k=6)
                 llm = load_llm()
 
@@ -292,17 +309,16 @@ Information not found in document.
                 answer = result.get("output_text", "") \
                     if isinstance(result, dict) else result
 
-        # -------- IMAGE MODE --------
+        # Image Answer
         else:
-            img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
-            if img_file:
-                img = Image.open(img_file).convert("RGB")
+            if not img_file:
+                answer = "Please upload an image first."
+            else:
                 processor, model, device = load_blip()
+                img = Image.open(img_file).convert("RGB")
                 inputs = processor(img, question, return_tensors="pt").to(device)
                 outputs = model.generate(**inputs, max_length=30)
                 answer = processor.decode(outputs[0], skip_special_tokens=True)
-            else:
-                answer = "Please upload an image first."
 
         save_message(
             st.session_state.user_id,
