@@ -1,9 +1,6 @@
 import streamlit as st
-import requests
-import hashlib
-import json
-import time
 from datetime import datetime
+import uuid
 from PyPDF2 import PdfReader
 from PIL import Image
 import torch
@@ -27,9 +24,6 @@ st.set_page_config(page_title="SlideSense AI", layout="wide")
 
 
 # -------------------- FIREBASE INIT --------------------
-import firebase_admin
-from firebase_admin import credentials, firestore
-
 if not firebase_admin._apps:
     cred = credentials.Certificate(dict(st.secrets["firebase"]))
     firebase_admin.initialize_app(cred)
@@ -38,70 +32,94 @@ db = firestore.client()
 
 
 # -------------------- SESSION INIT --------------------
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-if "user_id" not in st.session_state:
-    st.session_state.user_id = None
-if "email" not in st.session_state:
-    st.session_state.email = None
-if "mode" not in st.session_state:
-    st.session_state.mode = "PDF"
+defaults = {
+    "authenticated": False,
+    "user_id": None,
+    "email": None,
+    "mode": "PDF",
+    "current_chat_id": None,
+    "vector_db": None
+}
+
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 
 # -------------------- FIREBASE AUTH --------------------
 def signup(email, password):
     try:
-        user = auth.create_user(email=email, password=password)
-        return user
+        return auth.create_user(email=email, password=password)
     except:
         return None
 
 
 def login(email):
     try:
-        user = auth.get_user_by_email(email)
-        return user
+        return auth.get_user_by_email(email)
     except:
         return None
 
 
-# -------------------- FIRESTORE CHAT --------------------
-def save_chat(user_id, question, answer, mode):
+# -------------------- FIRESTORE CHAT STRUCTURE --------------------
+def create_new_chat(user_id, mode):
+    chat_id = str(uuid.uuid4())
     db.collection("users") \
       .document(user_id) \
       .collection("chats") \
-      .add({
-          "question": question,
-          "answer": answer,
+      .document(chat_id) \
+      .set({
           "mode": mode,
+          "created_at": datetime.utcnow(),
+          "title": "New Chat"
+      })
+    return chat_id
+
+
+def save_message(user_id, chat_id, role, content):
+    db.collection("users") \
+      .document(user_id) \
+      .collection("chats") \
+      .document(chat_id) \
+      .collection("messages") \
+      .add({
+          "role": role,
+          "content": content,
           "timestamp": datetime.utcnow()
       })
 
 
-def load_chat_history(user_id, mode):
+def load_user_chats(user_id, mode):
     chats = db.collection("users") \
               .document(user_id) \
               .collection("chats") \
               .where("mode", "==", mode) \
-              .order_by("timestamp") \
+              .order_by("created_at", direction=firestore.Query.DESCENDING) \
               .stream()
 
-    history = []
-    for chat in chats:
-        data = chat.to_dict()
-        history.append((data["question"], data["answer"]))
-
-    return history
+    return [(doc.id, doc.to_dict()["title"]) for doc in chats]
 
 
-# -------------------- CHATGPT STYLE CSS --------------------
+def load_messages(user_id, chat_id):
+    messages = db.collection("users") \
+                 .document(user_id) \
+                 .collection("chats") \
+                 .document(chat_id) \
+                 .collection("messages") \
+                 .order_by("timestamp") \
+                 .stream()
+
+    return [(doc.to_dict()["role"], doc.to_dict()["content"]) for doc in messages]
+
+
+# -------------------- CSS --------------------
 st.markdown("""
 <style>
 .chat-user {
     background-color: #343541;
     padding: 12px;
     border-radius: 10px;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     color: white;
 }
 .chat-ai {
@@ -110,10 +128,6 @@ st.markdown("""
     border-radius: 10px;
     margin-bottom: 15px;
     color: white;
-}
-.sidebar-title {
-    font-size:18px;
-    font-weight:bold;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -130,7 +144,7 @@ if not st.session_state.authenticated:
         email = st.text_input("Email")
         password = st.text_input("Password", type="password")
 
-        if st.button("Login"):
+        if st.button("Login", key="login_btn"):
             user = login(email)
             if user:
                 st.session_state.authenticated = True
@@ -144,7 +158,7 @@ if not st.session_state.authenticated:
         new_email = st.text_input("New Email")
         new_password = st.text_input("New Password", type="password")
 
-        if st.button("Create Account"):
+        if st.button("Signup", key="signup_btn"):
             user = signup(new_email, new_password)
             if user:
                 st.success("Account created!")
@@ -158,24 +172,32 @@ if not st.session_state.authenticated:
 st.sidebar.success(f"Logged in as {st.session_state.email}")
 
 if st.sidebar.button("Logout", key="logout_btn"):
-    st.session_state.authenticated = False
-    st.session_state.user_id = None
-    st.session_state.email = None
+    for k in defaults:
+        st.session_state[k] = defaults[k]
     st.rerun()
 
 mode = st.sidebar.radio(
     "Mode",
-    ["📘 PDF Analyzer", "🖼 Image Q&A"]
+    ["📘 PDF Analyzer", "🖼 Image Q&A"],
+    key="mode_radio"
 )
 
 st.session_state.mode = "PDF" if "PDF" in mode else "IMAGE"
 
-st.sidebar.markdown('<div class="sidebar-title">💬 Chat History</div>', unsafe_allow_html=True)
+st.sidebar.markdown("## 💬 Your Chats")
 
-history = load_chat_history(st.session_state.user_id, st.session_state.mode)
+user_chats = load_user_chats(st.session_state.user_id, st.session_state.mode)
 
-for i, (q, _) in enumerate(history[-10:]):
-    st.sidebar.write(f"• {q[:40]}...")
+for chat_id, title in user_chats:
+    if st.sidebar.button(title, key=chat_id):
+        st.session_state.current_chat_id = chat_id
+        st.rerun()
+
+if st.sidebar.button("➕ New Chat", key="new_chat_btn"):
+    new_chat_id = create_new_chat(st.session_state.user_id, st.session_state.mode)
+    st.session_state.current_chat_id = new_chat_id
+    st.session_state.vector_db = None
+    st.rerun()
 
 
 # -------------------- LLM --------------------
@@ -195,93 +217,101 @@ def load_blip():
     return processor, model, device
 
 
-# -------------------- PDF ANALYZER --------------------
-if st.session_state.mode == "PDF":
+# -------------------- MAIN CONTENT --------------------
+if st.session_state.current_chat_id:
 
-    st.title("📘 PDF Analyzer")
+    messages = load_messages(
+        st.session_state.user_id,
+        st.session_state.current_chat_id
+    )
 
-    pdf = st.file_uploader("Upload PDF", type="pdf")
+    for role, content in messages:
+        if role == "user":
+            st.markdown(f'<div class="chat-user">🧑 {content}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="chat-ai">🤖 {content}</div>', unsafe_allow_html=True)
 
-    if pdf:
+    question = st.chat_input("Ask something...")
 
-        if "vector_db" not in st.session_state:
-            with st.spinner("Processing PDF..."):
-                reader = PdfReader(pdf)
-                text = ""
-                for page in reader.pages:
-                    extracted = page.extract_text()
-                    if extracted:
-                        text += extracted + "\n"
+    if question:
 
-                splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=800,
-                    chunk_overlap=150
-                )
+        save_message(
+            st.session_state.user_id,
+            st.session_state.current_chat_id,
+            "user",
+            question
+        )
 
-                chunks = splitter.split_text(text)
-                embeddings = HuggingFaceEmbeddings(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2"
-                )
+        # -------- PDF MODE --------
+        if st.session_state.mode == "PDF":
 
-                st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
+            pdf = st.file_uploader("Upload PDF", type="pdf")
 
-        question = st.chat_input("Ask something about the PDF")
+            if pdf:
+                if st.session_state.vector_db is None:
+                    reader = PdfReader(pdf)
+                    text = ""
+                    for page in reader.pages:
+                        extracted = page.extract_text()
+                        if extracted:
+                            text += extracted + "\n"
 
-        if question:
-            docs = st.session_state.vector_db.similarity_search(question, k=8)
-            llm = load_llm()
+                    splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=800,
+                        chunk_overlap=150
+                    )
 
-            prompt = ChatPromptTemplate.from_template("""
+                    chunks = splitter.split_text(text)
+                    embeddings = HuggingFaceEmbeddings(
+                        model_name="sentence-transformers/all-MiniLM-L6-v2"
+                    )
+
+                    st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
+
+                docs = st.session_state.vector_db.similarity_search(question, k=6)
+                llm = load_llm()
+
+                prompt = ChatPromptTemplate.from_template("""
 Context:
 {context}
 
 Question:
 {question}
 
-If not found, say:
-Information not found in the document.
+If not found say:
+Information not found in document.
 """)
 
-            chain = create_stuff_documents_chain(llm, prompt)
+                chain = create_stuff_documents_chain(llm, prompt)
 
-            result = chain.invoke({
-                "context": docs,
-                "question": question
-            })
+                result = chain.invoke({
+                    "context": docs,
+                    "question": question
+                })
 
-            answer = result.get("output_text", "") \
-                if isinstance(result, dict) else result
+                answer = result.get("output_text", "") \
+                    if isinstance(result, dict) else result
 
-            save_chat(st.session_state.user_id, question, answer, "PDF")
-            st.rerun()
+        # -------- IMAGE MODE --------
+        else:
+            img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
+            if img_file:
+                img = Image.open(img_file).convert("RGB")
+                processor, model, device = load_blip()
+                inputs = processor(img, question, return_tensors="pt").to(device)
+                outputs = model.generate(**inputs, max_length=30)
+                answer = processor.decode(outputs[0], skip_special_tokens=True)
+            else:
+                answer = "Please upload an image first."
 
-    for q, a in history:
-        st.markdown(f'<div class="chat-user">🧑 {q}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="chat-ai">🤖 {a}</div>', unsafe_allow_html=True)
+        save_message(
+            st.session_state.user_id,
+            st.session_state.current_chat_id,
+            "assistant",
+            answer
+        )
 
+        st.rerun()
 
-# -------------------- IMAGE Q&A --------------------
-if st.session_state.mode == "IMAGE":
-
-    st.title("🖼 Image Q&A")
-
-    img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
-
-    if img_file:
-        img = Image.open(img_file).convert("RGB")
-        st.image(img, use_column_width=True)
-
-        question = st.chat_input("Ask something about the image")
-
-        if question:
-            processor, model, device = load_blip()
-            inputs = processor(img, question, return_tensors="pt").to(device)
-            outputs = model.generate(**inputs, max_length=30)
-            answer = processor.decode(outputs[0], skip_special_tokens=True)
-
-            save_chat(st.session_state.user_id, question, answer, "IMAGE")
-            st.rerun()
-
-    for q, a in history:
-        st.markdown(f'<div class="chat-user">🧑 {q}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="chat-ai">🤖 {a}</div>', unsafe_allow_html=True)
+else:
+    st.title("🚀 Start a New Chat from Sidebar")
