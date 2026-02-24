@@ -131,6 +131,32 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+from google_auth_oauthlib.flow import Flow
+import google.auth.transport.requests
+import requests as req
+
+GOOGLE_CLIENT_ID = st.secrets["GOOGLE_CLIENT_ID"]
+GOOGLE_CLIENT_SECRET = st.secrets["GOOGLE_CLIENT_SECRET"]
+GOOGLE_REDIRECT_URI = st.secrets["GOOGLE_REDIRECT_URI"]
+
+
+def google_login():
+    flow = Flow.from_client_config(
+        {
+            "web": {
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        },
+        scopes=["openid", "https://www.googleapis.com/auth/userinfo.email"],
+        redirect_uri=GOOGLE_REDIRECT_URI,
+    )
+
+    auth_url, _ = flow.authorization_url(prompt="consent")
+
+    st.markdown(f"[👉 Click here to Login with Google]({auth_url})")
 
 
 # -------------------- LOGIN UI --------------------
