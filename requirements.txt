@@ -1,4 +1,6 @@
-
+google-auth
+google-auth-oauthlib
+requests
 
 
 streamlit
