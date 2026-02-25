@@ -1,17 +1,20 @@
-streamlit
-requests
-PyPDF2
-Pillow
-
-firebase-admin
 google-auth
 google-auth-oauthlib
+requests
 
+
+streamlit
+PyPDF2
+python-dotenv
+torch==2.2.0
 langchain==0.1.17
 langchain-community==0.0.36
 langchain-text-splitters==0.0.1
 langchain-google-genai==0.0.9
 langchain-huggingface==0.0.3
 
-sentence-transformers==2.6.1
-faiss-cpu==1.7.4
+sentence-transformers
+faiss-cpu
+streamlit-lottie
+supabase
+firebase-admin  
