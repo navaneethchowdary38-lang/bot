@@ -38,7 +38,8 @@ defaults = {
     "email": None,
     "mode": "PDF",
     "current_chat_id": None,
-    "vector_db": None
+    "vector_db": None,
+    "edit_chat_id": None
 }
 
 for k, v in defaults.items():
@@ -64,10 +65,8 @@ def login(email):
 # -------------------- FIRESTORE CHAT STRUCTURE --------------------
 def create_new_chat(user_id, mode):
     chat_id = str(uuid.uuid4())
-    db.collection("users") \
-      .document(user_id) \
-      .collection("chats") \
-      .document(chat_id) \
+    db.collection("users").document(user_id) \
+      .collection("chats").document(chat_id) \
       .set({
           "mode": mode,
           "created_at": datetime.utcnow(),
@@ -77,27 +76,28 @@ def create_new_chat(user_id, mode):
 
 
 def save_message(user_id, chat_id, role, content):
-    db.collection("users") \
+    messages_ref = db.collection("users") \
       .document(user_id) \
       .collection("chats") \
       .document(chat_id) \
-      .collection("messages") \
-      .add({
-          "role": role,
-          "content": content,
-          "timestamp": datetime.utcnow()
-      })
+      .collection("messages")
 
+    messages_ref.add({
+        "role": role,
+        "content": content,
+        "timestamp": datetime.utcnow()
+    })
 
-def load_user_chats(user_id, mode):
-    chats = db.collection("users") \
+    # Auto-title on first user message
+    if role == "user":
+        msgs = list(messages_ref.stream())
+        if len(msgs) == 1:
+            short_title = content[:45] + "..." if len(content) > 45 else content
+            db.collection("users") \
               .document(user_id) \
               .collection("chats") \
-              .where("mode", "==", mode) \
-              .order_by("created_at", direction=firestore.Query.DESCENDING) \
-              .stream()
-
-    return [(doc.id, doc.to_dict()["title"]) for doc in chats]
+              .document(chat_id) \
+              .update({"title": short_title})
 
 
 def load_messages(user_id, chat_id):
@@ -110,6 +110,50 @@ def load_messages(user_id, chat_id):
                  .stream()
 
     return [(doc.to_dict()["role"], doc.to_dict()["content"]) for doc in messages]
+
+
+# -------------------- HELPERS --------------------
+def update_chat_title(user_id, chat_id, title):
+    db.collection("users").document(user_id) \
+      .collection("chats").document(chat_id) \
+      .update({"title": title})
+
+
+def delete_chat(user_id, chat_id):
+    chat_ref = db.collection("users") \
+        .document(user_id) \
+        .collection("chats") \
+        .document(chat_id)
+
+    for msg in chat_ref.collection("messages").stream():
+        msg.reference.delete()
+
+    chat_ref.delete()
+
+
+def group_chats_by_date(chats):
+    today = datetime.utcnow().date()
+    yesterday = today.fromordinal(today.toordinal() - 1)
+
+    groups = {
+        "Today": [],
+        "Yesterday": [],
+        "Last 7 Days": [],
+        "Older": []
+    }
+
+    for chat_id, data in chats:
+        created = data["created_at"].date()
+        if created == today:
+            groups["Today"].append((chat_id, data))
+        elif created == yesterday:
+            groups["Yesterday"].append((chat_id, data))
+        elif (today - created).days <= 7:
+            groups["Last 7 Days"].append((chat_id, data))
+        else:
+            groups["Older"].append((chat_id, data))
+
+    return groups
 
 
 # -------------------- CSS --------------------
@@ -129,22 +173,55 @@ st.markdown("""
     margin-bottom: 15px;
     color: white;
 }
+
+/* Sidebar UI */
+.chat-item {
+    padding: 10px 12px;
+    border-radius: 10px;
+    margin-bottom: 6px;
+    background: rgba(255,255,255,0.05);
+    transition: all 0.25s ease;
+    cursor: pointer;
+    animation: slideIn 0.3s ease;
+}
+.chat-item:hover {
+    background: rgba(0, 255, 255, 0.12);
+    transform: translateX(6px) scale(1.01);
+    box-shadow: 0 0 12px rgba(0,255,255,0.2);
+}
+.chat-active {
+    background: linear-gradient(90deg, #00f5ff33, #00ff9c22);
+    border-left: 3px solid #00f5ff;
+}
+.chat-title {
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.group-title {
+    font-size: 12px;
+    margin: 12px 0 6px 4px;
+    opacity: 0.6;
+    text-transform: uppercase;
+}
+@keyframes slideIn {
+    from {opacity:0; transform:translateX(-10px);}
+    to {opacity:1; transform:translateX(0);}
+}
 </style>
 """, unsafe_allow_html=True)
 
 
-# -------------------- LOGIN UI --------------------
+# -------------------- LOGIN --------------------
 if not st.session_state.authenticated:
-
     st.title("🔐 SlideSense Login")
-
     tab1, tab2 = st.tabs(["Login", "Sign Up"])
 
     with tab1:
         email = st.text_input("Email")
         password = st.text_input("Password", type="password")
-
-        if st.button("Login", key="login_btn"):
+        if st.button("Login"):
             user = login(email)
             if user:
                 st.session_state.authenticated = True
@@ -157,8 +234,7 @@ if not st.session_state.authenticated:
     with tab2:
         new_email = st.text_input("New Email")
         new_password = st.text_input("New Password", type="password")
-
-        if st.button("Signup", key="signup_btn"):
+        if st.button("Signup"):
             user = signup(new_email, new_password)
             if user:
                 st.success("Account created!")
@@ -171,29 +247,64 @@ if not st.session_state.authenticated:
 # -------------------- SIDEBAR --------------------
 st.sidebar.success(f"Logged in as {st.session_state.email}")
 
-if st.sidebar.button("Logout", key="logout_btn"):
+if st.sidebar.button("Logout"):
     for k in defaults:
         st.session_state[k] = defaults[k]
     st.rerun()
 
-mode = st.sidebar.radio(
-    "Mode",
-    ["📘 PDF Analyzer", "🖼 Image Q&A"],
-    key="mode_radio"
-)
-
+mode = st.sidebar.radio("Mode", ["📘 PDF Analyzer", "🖼 Image Q&A"])
 st.session_state.mode = "PDF" if "PDF" in mode else "IMAGE"
 
 st.sidebar.markdown("## 💬 Your Chats")
 
-user_chats = load_user_chats(st.session_state.user_id, st.session_state.mode)
+chat_docs = db.collection("users") \
+    .document(st.session_state.user_id) \
+    .collection("chats") \
+    .where("mode", "==", st.session_state.mode) \
+    .order_by("created_at", direction=firestore.Query.DESCENDING) \
+    .stream()
 
-for chat_id, title in user_chats:
-    if st.sidebar.button(title, key=chat_id):
-        st.session_state.current_chat_id = chat_id
+chats = [(doc.id, doc.to_dict()) for doc in chat_docs]
+grouped = group_chats_by_date(chats)
+
+for group, items in grouped.items():
+    if not items:
+        continue
+    st.sidebar.markdown(f'<div class="group-title">{group}</div>', unsafe_allow_html=True)
+
+    for chat_id, data in items:
+        title = data.get("title", "New Chat")
+        active = "chat-active" if st.session_state.current_chat_id == chat_id else ""
+
+        st.sidebar.markdown(
+            f'<div class="chat-item {active}"><span class="chat-title">{title}</span></div>',
+            unsafe_allow_html=True
+        )
+
+        c1, c2, c3 = st.sidebar.columns([6,1,1])
+
+        if c1.button(" ", key=f"open_{chat_id}"):
+            st.session_state.current_chat_id = chat_id
+            st.rerun()
+
+        if c2.button("✏️", key=f"edit_{chat_id}"):
+            st.session_state.edit_chat_id = chat_id
+
+        if c3.button("🗑", key=f"del_{chat_id}"):
+            delete_chat(st.session_state.user_id, chat_id)
+            if st.session_state.current_chat_id == chat_id:
+                st.session_state.current_chat_id = None
+            st.rerun()
+
+if st.session_state.edit_chat_id:
+    st.sidebar.markdown("### ✏️ Rename Chat")
+    new_title = st.sidebar.text_input("New title")
+    if st.sidebar.button("Save Title"):
+        update_chat_title(st.session_state.user_id, st.session_state.edit_chat_id, new_title)
+        st.session_state.edit_chat_id = None
         st.rerun()
 
-if st.sidebar.button("➕ New Chat", key="new_chat_btn"):
+if st.sidebar.button("➕ New Chat"):
     new_chat_id = create_new_chat(st.session_state.user_id, st.session_state.mode)
     st.session_state.current_chat_id = new_chat_id
     st.session_state.vector_db = None
@@ -203,10 +314,7 @@ if st.sidebar.button("➕ New Chat", key="new_chat_btn"):
 # -------------------- LLM --------------------
 @st.cache_resource
 def load_llm():
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        temperature=0.3
-    )
+    return ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.3)
 
 
 @st.cache_resource
@@ -217,50 +325,36 @@ def load_blip():
     return processor, model, device
 
 
-# -------------------- MAIN CONTENT --------------------
-
+# -------------------- MAIN --------------------
 if st.session_state.current_chat_id:
 
-    # -------- PDF MODE --------
     if st.session_state.mode == "PDF":
-
         st.title("📘 PDF Analyzer")
-
         pdf = st.file_uploader("Upload PDF", type="pdf")
 
         if pdf and st.session_state.vector_db is None:
             with st.spinner("Processing PDF..."):
                 reader = PdfReader(pdf)
                 text = ""
-
                 for page in reader.pages:
                     extracted = page.extract_text()
                     if extracted:
                         text += extracted + "\n"
 
-                splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=800,
-                    chunk_overlap=150
-                )
-
+                splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
                 chunks = splitter.split_text(text)
+
                 embeddings = HuggingFaceEmbeddings(
                     model_name="sentence-transformers/all-MiniLM-L6-v2"
                 )
 
                 st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
 
-    # -------- IMAGE MODE --------
     if st.session_state.mode == "IMAGE":
-
         st.title("🖼 Image Q&A")
         img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
 
-    # -------- LOAD MESSAGES --------
-    messages = load_messages(
-        st.session_state.user_id,
-        st.session_state.current_chat_id
-    )
+    messages = load_messages(st.session_state.user_id, st.session_state.current_chat_id)
 
     for role, content in messages:
         if role == "user":
@@ -268,26 +362,17 @@ if st.session_state.current_chat_id:
         else:
             st.markdown(f'<div class="chat-ai">🤖 {content}</div>', unsafe_allow_html=True)
 
-    # -------- CHAT INPUT --------
     question = st.chat_input("Ask something...")
 
     if question:
+        save_message(st.session_state.user_id, st.session_state.current_chat_id, "user", question)
 
-        save_message(
-            st.session_state.user_id,
-            st.session_state.current_chat_id,
-            "user",
-            question
-        )
-
-        # PDF Answer
         if st.session_state.mode == "PDF":
             if st.session_state.vector_db is None:
                 answer = "Please upload a PDF first."
             else:
                 docs = st.session_state.vector_db.similarity_search(question, k=6)
                 llm = load_llm()
-
                 prompt = ChatPromptTemplate.from_template("""
 Context:
 {context}
@@ -298,18 +383,10 @@ Question:
 If not found say:
 Information not found in document.
 """)
-
                 chain = create_stuff_documents_chain(llm, prompt)
+                result = chain.invoke({"context": docs, "question": question})
+                answer = result.get("output_text", "") if isinstance(result, dict) else result
 
-                result = chain.invoke({
-                    "context": docs,
-                    "question": question
-                })
-
-                answer = result.get("output_text", "") \
-                    if isinstance(result, dict) else result
-
-        # Image Answer
         else:
             if not img_file:
                 answer = "Please upload an image first."
@@ -320,15 +397,8 @@ Information not found in document.
                 outputs = model.generate(**inputs, max_length=30)
                 answer = processor.decode(outputs[0], skip_special_tokens=True)
 
-        save_message(
-            st.session_state.user_id,
-            st.session_state.current_chat_id,
-            "assistant",
-            answer
-        )
-
+        save_message(st.session_state.user_id, st.session_state.current_chat_id, "assistant", answer)
         st.rerun()
 
 else:
-    st.title("🚀 Start a New Chat from Sidebar")
     st.title("🚀 Start a New Chat from Sidebar")
