@@ -275,32 +275,38 @@ Information not found in document.
 
                 answer = result.get("output_text", "") if isinstance(result, dict) else result
 
-        # -------- IMAGE ANSWER (Gemini Vision Only) --------
-        else:
-            if not img_file:
-                answer = "Please upload an image first."
-            else:
-                llm = load_llm()
+        import base64
 
-                image_bytes = img_file.getvalue()
+# -------- IMAGE ANSWER (Gemini Vision Only FIXED) --------
+else:
+    if not img_file:
+        answer = "Please upload an image first."
+    else:
+        with st.spinner("🖼 Analyzing image..."):
 
-                response = llm.invoke(
-                    [
-                        HumanMessage(
-                            content=[
-                                {"type": "text", "text": question},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{image_bytes.hex()}"
-                                    },
+            llm = load_llm()
+
+            # Convert image to base64
+            image_bytes = img_file.getvalue()
+            encoded_image = base64.b64encode(image_bytes).decode("utf-8")
+
+            response = llm.invoke(
+                [
+                    HumanMessage(
+                        content=[
+                            {"type": "text", "text": question},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{encoded_image}"
                                 },
-                            ]
-                        )
-                    ]
-                )
+                            },
+                        ]
+                    )
+                ]
+            )
 
-                answer = response.content
+            answer = response.content
 
         save_message(
             st.session_state.user_id,
