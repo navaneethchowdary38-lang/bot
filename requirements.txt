@@ -1,8 +1,11 @@
 streamlit
-PyPDF2
-python-dotenv
 requests
-streamlit-lottie
+PyPDF2
+Pillow
+
+firebase-admin
+google-auth
+google-auth-oauthlib
 
 langchain==0.1.17
 langchain-community==0.0.36
@@ -10,11 +13,8 @@ langchain-text-splitters==0.0.1
 langchain-google-genai==0.0.9
 langchain-huggingface==0.0.3
 
-sentence-transformers
-faiss-cpu
+sentence-transformers==2.6.1
+faiss-cpu==1.7.4
 
-firebase-admin
-supabase
-
-transformers
-torch --index-url https://download.pytorch.org/whl/cpu
+transformers==4.39.3
+torch==2.2.2 --index-url https://download.pytorch.org/whl/cpu
