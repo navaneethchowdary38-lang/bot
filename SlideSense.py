@@ -259,42 +259,42 @@ Information not found in document.
 
                 answer = result.get("output_text", "") if isinstance(result, dict) else result
 
-        # -------- IMAGE ANSWER (BLIP + GEMINI) --------
         else:
-            if not img_file:
-                answer = "Please upload an image first."
-            else:
-                processor, model, device = load_blip()
-                llm = load_llm()
+    if not img_file:
+        answer = "Please upload an image first."
+    else:
+        with st.spinner("Analyzing image..."):
 
-                img = Image.open(img_file).convert("RGB")
+            processor, model, device = load_blip()
+            llm = load_llm()
 
-                inputs = processor(img, question, return_tensors="pt").to(device)
-                outputs = model.generate(**inputs, max_length=30)
-                short_answer = processor.decode(outputs[0], skip_special_tokens=True)
+            img = Image.open(img_file).convert("RGB")
 
-                detailed_prompt = f"""
-User Question:
-{question}
+            # ---- BLIP (short answer, faster) ----
+            inputs = processor(img, question, return_tensors="pt").to(device)
+            outputs = model.generate(
+                **inputs,
+                max_length=15,      # smaller = faster
+                num_beams=1         # remove beam search for speed
+            )
 
-BLIP Visual Answer:
-{short_answer}
+            short_answer = processor.decode(
+                outputs[0],
+                skip_special_tokens=True
+            )
 
-Provide a detailed explanation in 5-7 sentences.
+            # ---- Gemini Expansion (short response) ----
+            detailed_prompt = f"""
+Question: {question}
+Visual Info: {short_answer}
+
+Give a clear explanation in 3-4 sentences only.
 """
 
-                gemini_response = llm.invoke(detailed_prompt)
+            gemini_response = llm.invoke(detailed_prompt)
 
-                answer = gemini_response.content if hasattr(gemini_response, "content") else str(gemini_response)
-
-        save_message(
-            st.session_state.user_id,
-            st.session_state.current_chat_id,
-            "assistant",
-            answer
-        )
-
-        st.rerun()
+            answer = gemini_response.content if hasattr(
+                gemini_response, "content") else str(gemini_response)
 
 else:
     st.title("🚀 Start a New Chat from Sidebar")
