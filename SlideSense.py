@@ -112,6 +112,33 @@ def load_messages(user_id, chat_id):
     return [(doc.to_dict()["role"], doc.to_dict()["content"]) for doc in messages]
 
 
+# -------------------- CLEAR CHAT --------------------
+def clear_chat(user_id, chat_id):
+    messages_ref = db.collection("users").document(user_id) \
+                     .collection("chats").document(chat_id) \
+                     .collection("messages").stream()
+    for msg in messages_ref:
+        msg.reference.delete()
+
+    db.collection("users").document(user_id) \
+      .collection("chats").document(chat_id) \
+      .update({"title": "New Chat"})
+
+    st.session_state.vector_db = None
+
+
+# -------------------- AUTO TITLE --------------------
+def generate_chat_title(question: str) -> str:
+    llm = load_llm()
+    prompt = (
+        "Generate a concise chat title (max 5 words, no quotes) "
+        f"for a conversation that starts with this question: {question}"
+    )
+    response = llm.invoke(prompt)
+    title = response.content.strip().strip('"').strip("'")
+    return title[:40]
+
+
 # -------------------- CSS --------------------
 st.markdown("""
 <style>
@@ -189,7 +216,15 @@ st.sidebar.markdown("## 💬 Your Chats")
 user_chats = load_user_chats(st.session_state.user_id, st.session_state.mode)
 
 for chat_id, title in user_chats:
-    if st.sidebar.button(title, key=chat_id):
+    col1, col2 = st.sidebar.columns([4, 1])
+
+    if col1.button(title, key=f"select_{chat_id}"):
+        st.session_state.current_chat_id = chat_id
+        st.session_state.vector_db = None
+        st.rerun()
+
+    if col2.button("🧹", key=f"clear_{chat_id}", help="Clear chat"):
+        clear_chat(st.session_state.user_id, chat_id)
         st.session_state.current_chat_id = chat_id
         st.rerun()
 
@@ -280,6 +315,20 @@ if st.session_state.current_chat_id:
             question
         )
 
+        # 🔥 Auto-title on first message
+        current_messages = load_messages(
+            st.session_state.user_id,
+            st.session_state.current_chat_id
+        )
+        if len(current_messages) == 1:
+            with st.spinner("Naming chat..."):
+                new_title = generate_chat_title(question)
+            db.collection("users") \
+              .document(st.session_state.user_id) \
+              .collection("chats") \
+              .document(st.session_state.current_chat_id) \
+              .update({"title": new_title})
+
         # PDF Answer
         if st.session_state.mode == "PDF":
             if st.session_state.vector_db is None:
@@ -330,5 +379,4 @@ Information not found in document.
         st.rerun()
 
 else:
-    st.title("🚀 Start a New Chat from Sidebar")
     st.title("🚀 Start a New Chat from Sidebar")
