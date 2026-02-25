@@ -64,87 +64,51 @@ def login(email):
 # -------------------- FIRESTORE CHAT STRUCTURE --------------------
 def create_new_chat(user_id, mode):
     chat_id = str(uuid.uuid4())
-    db.collection("users") \
-      .document(user_id) \
-      .collection("chats") \
-      .document(chat_id) \
-      .set({
-          "mode": mode,
-          "created_at": datetime.utcnow(),
-          "title": "New Chat"
-      })
+    db.collection("users").document(user_id).collection("chats").document(chat_id).set({
+        "mode": mode,
+        "created_at": datetime.utcnow(),
+        "title": "New Chat"
+    })
     return chat_id
 
 
 def save_message(user_id, chat_id, role, content):
-    db.collection("users") \
-      .document(user_id) \
-      .collection("chats") \
-      .document(chat_id) \
-      .collection("messages") \
-      .add({
-          "role": role,
-          "content": content,
-          "timestamp": datetime.utcnow()
-      })
+    db.collection("users").document(user_id).collection("chats") \
+        .document(chat_id).collection("messages").add({
+            "role": role,
+            "content": content,
+            "timestamp": datetime.utcnow()
+        })
 
 
 def load_user_chats(user_id, mode):
-    chats = db.collection("users") \
-              .document(user_id) \
-              .collection("chats") \
-              .where("mode", "==", mode) \
-              .order_by("created_at", direction=firestore.Query.DESCENDING) \
-              .stream()
+    chats = db.collection("users").document(user_id).collection("chats") \
+        .where("mode", "==", mode) \
+        .order_by("created_at", direction=firestore.Query.DESCENDING) \
+        .stream()
 
     return [(doc.id, doc.to_dict()["title"]) for doc in chats]
 
 
 def load_messages(user_id, chat_id):
-    messages = db.collection("users") \
-                 .document(user_id) \
-                 .collection("chats") \
-                 .document(chat_id) \
-                 .collection("messages") \
-                 .order_by("timestamp") \
-                 .stream()
+    messages = db.collection("users").document(user_id).collection("chats") \
+        .document(chat_id).collection("messages") \
+        .order_by("timestamp").stream()
 
     return [(doc.to_dict()["role"], doc.to_dict()["content"]) for doc in messages]
-
-
-# -------------------- CSS --------------------
-st.markdown("""
-<style>
-.chat-user {
-    background-color: #343541;
-    padding: 12px;
-    border-radius: 10px;
-    margin-bottom: 8px;
-    color: white;
-}
-.chat-ai {
-    background-color: #444654;
-    padding: 12px;
-    border-radius: 10px;
-    margin-bottom: 15px;
-    color: white;
-}
-</style>
-""", unsafe_allow_html=True)
 
 
 # -------------------- LOGIN UI --------------------
 if not st.session_state.authenticated:
 
     st.title("🔐 SlideSense Login")
-
     tab1, tab2 = st.tabs(["Login", "Sign Up"])
 
     with tab1:
         email = st.text_input("Email")
         password = st.text_input("Password", type="password")
 
-        if st.button("Login", key="login_btn"):
+        if st.button("Login"):
             user = login(email)
             if user:
                 st.session_state.authenticated = True
@@ -158,7 +122,7 @@ if not st.session_state.authenticated:
         new_email = st.text_input("New Email")
         new_password = st.text_input("New Password", type="password")
 
-        if st.button("Signup", key="signup_btn"):
+        if st.button("Signup"):
             user = signup(new_email, new_password)
             if user:
                 st.success("Account created!")
@@ -171,17 +135,12 @@ if not st.session_state.authenticated:
 # -------------------- SIDEBAR --------------------
 st.sidebar.success(f"Logged in as {st.session_state.email}")
 
-if st.sidebar.button("Logout", key="logout_btn"):
+if st.sidebar.button("Logout"):
     for k in defaults:
         st.session_state[k] = defaults[k]
     st.rerun()
 
-mode = st.sidebar.radio(
-    "Mode",
-    ["📘 PDF Analyzer", "🖼 Image Q&A"],
-    key="mode_radio"
-)
-
+mode = st.sidebar.radio("Mode", ["📘 PDF Analyzer", "🖼 Image Q&A"])
 st.session_state.mode = "PDF" if "PDF" in mode else "IMAGE"
 
 st.sidebar.markdown("## 💬 Your Chats")
@@ -193,7 +152,7 @@ for chat_id, title in user_chats:
         st.session_state.current_chat_id = chat_id
         st.rerun()
 
-if st.sidebar.button("➕ New Chat", key="new_chat_btn"):
+if st.sidebar.button("➕ New Chat"):
     new_chat_id = create_new_chat(st.session_state.user_id, st.session_state.mode)
     st.session_state.current_chat_id = new_chat_id
     st.session_state.vector_db = None
@@ -218,45 +177,38 @@ def load_blip():
 
 
 # -------------------- MAIN CONTENT --------------------
-
 if st.session_state.current_chat_id:
 
-    # -------- PDF MODE --------
     if st.session_state.mode == "PDF":
 
         st.title("📘 PDF Analyzer")
-
         pdf = st.file_uploader("Upload PDF", type="pdf")
 
         if pdf and st.session_state.vector_db is None:
-            with st.spinner("Processing PDF..."):
-                reader = PdfReader(pdf)
-                text = ""
+            reader = PdfReader(pdf)
+            text = ""
 
-                for page in reader.pages:
-                    extracted = page.extract_text()
-                    if extracted:
-                        text += extracted + "\n"
+            for page in reader.pages:
+                extracted = page.extract_text()
+                if extracted:
+                    text += extracted + "\n"
 
-                splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=800,
-                    chunk_overlap=150
-                )
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=800,
+                chunk_overlap=150
+            )
 
-                chunks = splitter.split_text(text)
-                embeddings = HuggingFaceEmbeddings(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2"
-                )
+            chunks = splitter.split_text(text)
+            embeddings = HuggingFaceEmbeddings(
+                model_name="sentence-transformers/all-MiniLM-L6-v2"
+            )
 
-                st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
+            st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
 
-    # -------- IMAGE MODE --------
-    if st.session_state.mode == "IMAGE":
-
+    else:
         st.title("🖼 Image Q&A")
         img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
 
-    # -------- LOAD MESSAGES --------
     messages = load_messages(
         st.session_state.user_id,
         st.session_state.current_chat_id
@@ -264,11 +216,10 @@ if st.session_state.current_chat_id:
 
     for role, content in messages:
         if role == "user":
-            st.markdown(f'<div class="chat-user">🧑 {content}</div>', unsafe_allow_html=True)
+            st.markdown(f"🧑 {content}")
         else:
-            st.markdown(f'<div class="chat-ai">🤖 {content}</div>', unsafe_allow_html=True)
+            st.markdown(f"🤖 {content}")
 
-    # -------- CHAT INPUT --------
     question = st.chat_input("Ask something...")
 
     if question:
@@ -280,7 +231,7 @@ if st.session_state.current_chat_id:
             question
         )
 
-        # PDF Answer
+        # -------- PDF ANSWER --------
         if st.session_state.mode == "PDF":
             if st.session_state.vector_db is None:
                 answer = "Please upload a PDF first."
@@ -306,44 +257,44 @@ Information not found in document.
                     "question": question
                 })
 
-                answer = result.get("output_text", "") \
-                    if isinstance(result, dict) else result
+                answer = result.get("output_text", "") if isinstance(result, dict) else result
 
-       # Image Answer (BLIP + Gemini Combined)
-else:
-    if not img_file:
-        answer = "Please upload an image first."
-    else:
-        processor, model, device = load_blip()
-        llm = load_llm()
+        # -------- IMAGE ANSWER (BLIP + GEMINI) --------
+        else:
+            if not img_file:
+                answer = "Please upload an image first."
+            else:
+                processor, model, device = load_blip()
+                llm = load_llm()
 
-        img = Image.open(img_file).convert("RGB")
+                img = Image.open(img_file).convert("RGB")
 
-        # Step 1: Get short visual answer from BLIP
-        inputs = processor(img, question, return_tensors="pt").to(device)
-        outputs = model.generate(**inputs, max_length=30)
-        short_answer = processor.decode(outputs[0], skip_special_tokens=True)
+                inputs = processor(img, question, return_tensors="pt").to(device)
+                outputs = model.generate(**inputs, max_length=30)
+                short_answer = processor.decode(outputs[0], skip_special_tokens=True)
 
-        # Step 2: Send BLIP answer to Gemini for detailed explanation
-        detailed_prompt = f"""
-You are an AI image analyst.
-
+                detailed_prompt = f"""
 User Question:
 {question}
 
 BLIP Visual Answer:
 {short_answer}
 
-Based on the visual understanding, provide a detailed explanation in 5-7 sentences.
-If possible, describe objects, actions, colors, and context clearly.
+Provide a detailed explanation in 5-7 sentences.
 """
 
-        gemini_response = llm.invoke(detailed_prompt)
+                gemini_response = llm.invoke(detailed_prompt)
 
-        if hasattr(gemini_response, "content"):
-            answer = gemini_response.content
-        else:
-            answer = str(gemini_response)
+                answer = gemini_response.content if hasattr(gemini_response, "content") else str(gemini_response)
+
+        save_message(
+            st.session_state.user_id,
+            st.session_state.current_chat_id,
+            "assistant",
+            answer
+        )
+
+        st.rerun()
 
 else:
     st.title("🚀 Start a New Chat from Sidebar")
