@@ -1,11 +1,8 @@
-google-auth
-google-auth-oauthlib
-requests
-
-
 streamlit
 PyPDF2
 python-dotenv
+requests
+streamlit-lottie
 
 langchain==0.1.17
 langchain-community==0.0.36
@@ -15,6 +12,9 @@ langchain-huggingface==0.0.3
 
 sentence-transformers
 faiss-cpu
-streamlit-lottie
-supabase
+
 firebase-admin
+supabase
+
+transformers
+torch --index-url https://download.pytorch.org/whl/cpu
