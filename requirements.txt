@@ -9,3 +9,9 @@ firebase-admin
 langchain==0.1.17
 langchain-google-genai==0.0.9
 langchain-text-splitters==0.0.1
+langchain-community
+langchain-huggingface
+torch
+transformers
+sentence-transformers
+faiss-cpu
