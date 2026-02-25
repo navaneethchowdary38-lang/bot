@@ -3,7 +3,7 @@ from datetime import datetime
 import uuid
 from PyPDF2 import PdfReader
 from PIL import Image
-import io
+import base64
 
 # Firebase
 import firebase_admin
@@ -275,38 +275,34 @@ Information not found in document.
 
                 answer = result.get("output_text", "") if isinstance(result, dict) else result
 
-        import base64
+        # -------- IMAGE ANSWER (Gemini Vision) --------
+        else:
+            if not img_file:
+                answer = "Please upload an image first."
+            else:
+                with st.spinner("🖼 Analyzing image..."):
 
-# -------- IMAGE ANSWER (Gemini Vision Only FIXED) --------
-else:
-    if not img_file:
-        answer = "Please upload an image first."
-    else:
-        with st.spinner("🖼 Analyzing image..."):
+                    llm = load_llm()
+                    image_bytes = img_file.getvalue()
+                    encoded_image = base64.b64encode(image_bytes).decode("utf-8")
 
-            llm = load_llm()
-
-            # Convert image to base64
-            image_bytes = img_file.getvalue()
-            encoded_image = base64.b64encode(image_bytes).decode("utf-8")
-
-            response = llm.invoke(
-                [
-                    HumanMessage(
-                        content=[
-                            {"type": "text", "text": question},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{encoded_image}"
-                                },
-                            },
+                    response = llm.invoke(
+                        [
+                            HumanMessage(
+                                content=[
+                                    {"type": "text", "text": question},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:image/jpeg;base64,{encoded_image}"
+                                        },
+                                    },
+                                ]
+                            )
                         ]
                     )
-                ]
-            )
 
-            answer = response.content
+                    answer = response.content
 
         save_message(
             st.session_state.user_id,
