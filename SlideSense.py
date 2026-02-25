@@ -3,7 +3,11 @@ from datetime import datetime
 import uuid
 from PyPDF2 import PdfReader
 from PIL import Image
-import torch
+
+try:
+    import torch
+except ImportError:
+    torch = None
 
 # Firebase
 import firebase_admin
@@ -16,7 +20,12 @@ from langchain_community.vectorstores import FAISS
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
-from transformers import BlipProcessor, BlipForQuestionAnswering
+
+try:
+    from transformers import BlipProcessor, BlipForQuestionAnswering
+except ImportError:
+    BlipProcessor = None
+    BlipForQuestionAnswering = None
 
 
 # -------------------- PAGE CONFIG --------------------
@@ -24,9 +33,27 @@ st.set_page_config(page_title="SlideSense AI", layout="wide")
 
 
 # -------------------- FIREBASE INIT --------------------
+firebase_config = st.secrets.get("firebase", None)
+
+if not firebase_config:
+    st.error(
+        "Firebase credentials not found.\n\n"
+        "Add a `[firebase]` section to your Streamlit secrets with your "
+        "Firebase service account JSON fields."
+    )
+    st.stop()
+
 if not firebase_admin._apps:
-    cred = credentials.Certificate(dict(st.secrets["firebase"]))
-    firebase_admin.initialize_app(cred)
+    try:
+        cred = credentials.Certificate(dict(firebase_config))
+        firebase_admin.initialize_app(cred)
+    except Exception:
+        st.error(
+            "Failed to initialize Firebase.\n\n"
+            "Please verify that your Firebase service account values in "
+            "Streamlit secrets are correct (including `private_key`)."
+        )
+        st.stop()
 
 db = firestore.client()
 
@@ -211,6 +238,9 @@ def load_llm():
 
 @st.cache_resource
 def load_blip():
+    if torch is None or BlipProcessor is None or BlipForQuestionAnswering is None:
+        return None, None, "cpu"
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     processor = BlipProcessor.from_pretrained("Salesforce/blip-vqa-base")
     model = BlipForQuestionAnswering.from_pretrained("Salesforce/blip-vqa-base").to(device)
@@ -315,10 +345,17 @@ Information not found in document.
                 answer = "Please upload an image first."
             else:
                 processor, model, device = load_blip()
-                img = Image.open(img_file).convert("RGB")
-                inputs = processor(img, question, return_tensors="pt").to(device)
-                outputs = model.generate(**inputs, max_length=30)
-                answer = processor.decode(outputs[0], skip_special_tokens=True)
+                if processor is None or model is None:
+                    answer = (
+                        "Image Q&A is not available because the required vision "
+                        "libraries (PyTorch and transformers) are not installed "
+                        "on the server."
+                    )
+                else:
+                    img = Image.open(img_file).convert("RGB")
+                    inputs = processor(img, question, return_tensors="pt").to(device)
+                    outputs = model.generate(**inputs, max_length=30)
+                    answer = processor.decode(outputs[0], skip_special_tokens=True)
 
         save_message(
             st.session_state.user_id,
