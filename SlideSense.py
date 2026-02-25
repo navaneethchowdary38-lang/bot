@@ -18,11 +18,12 @@ from langchain.prompts import ChatPromptTemplate
 st.set_page_config(page_title="SlideSense AI", layout="wide")
 
 # -------------------- FIREBASE INIT --------------------
-if not firebase_admin._apps:
-    cred = credentials.Certificate(st.secrets["firebase"])
-    firebase_admin.initialize_app(cred)
+import json
 
-db = firestore.client()
+if not firebase_admin._apps:
+    firebase_dict = json.loads(json.dumps(st.secrets["firebase"]))
+    cred = credentials.Certificate(firebase_dict)
+    firebase_admin.initialize_app(cred)
 
 # -------------------- SESSION --------------------
 defaults = {
