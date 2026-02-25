@@ -18,6 +18,9 @@ from langchain.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 from transformers import BlipProcessor, BlipForQuestionAnswering
 
+# Google OAuth
+from google_auth_oauthlib.flow import Flow
+
 
 # -------------------- PAGE CONFIG --------------------
 st.set_page_config(page_title="SlideSense AI", layout="wide")
@@ -64,77 +67,41 @@ def login(email):
 # -------------------- FIRESTORE CHAT STRUCTURE --------------------
 def create_new_chat(user_id, mode):
     chat_id = str(uuid.uuid4())
-    db.collection("users") \
-      .document(user_id) \
-      .collection("chats") \
-      .document(chat_id) \
-      .set({
-          "mode": mode,
-          "created_at": datetime.utcnow(),
-          "title": "New Chat"
-      })
+    db.collection("users").document(user_id).collection("chats").document(chat_id).set({
+        "mode": mode,
+        "created_at": datetime.utcnow(),
+        "title": "New Chat"
+    })
     return chat_id
 
 
 def save_message(user_id, chat_id, role, content):
-    db.collection("users") \
-      .document(user_id) \
-      .collection("chats") \
-      .document(chat_id) \
-      .collection("messages") \
-      .add({
-          "role": role,
-          "content": content,
-          "timestamp": datetime.utcnow()
-      })
+    db.collection("users").document(user_id).collection("chats").document(chat_id)\
+        .collection("messages").add({
+            "role": role,
+            "content": content,
+            "timestamp": datetime.utcnow()
+        })
 
 
 def load_user_chats(user_id, mode):
-    chats = db.collection("users") \
-              .document(user_id) \
-              .collection("chats") \
-              .where("mode", "==", mode) \
-              .order_by("created_at", direction=firestore.Query.DESCENDING) \
-              .stream()
+    chats = db.collection("users").document(user_id).collection("chats")\
+        .where("mode", "==", mode)\
+        .order_by("created_at", direction=firestore.Query.DESCENDING)\
+        .stream()
 
     return [(doc.id, doc.to_dict()["title"]) for doc in chats]
 
 
 def load_messages(user_id, chat_id):
-    messages = db.collection("users") \
-                 .document(user_id) \
-                 .collection("chats") \
-                 .document(chat_id) \
-                 .collection("messages") \
-                 .order_by("timestamp") \
-                 .stream()
+    messages = db.collection("users").document(user_id).collection("chats")\
+        .document(chat_id).collection("messages")\
+        .order_by("timestamp").stream()
 
     return [(doc.to_dict()["role"], doc.to_dict()["content"]) for doc in messages]
 
 
-# -------------------- CSS --------------------
-st.markdown("""
-<style>
-.chat-user {
-    background-color: #343541;
-    padding: 12px;
-    border-radius: 10px;
-    margin-bottom: 8px;
-    color: white;
-}
-.chat-ai {
-    background-color: #444654;
-    padding: 12px;
-    border-radius: 10px;
-    margin-bottom: 15px;
-    color: white;
-}
-</style>
-""", unsafe_allow_html=True)
-from google_auth_oauthlib.flow import Flow
-import google.auth.transport.requests
-import requests as req
-
+# -------------------- GOOGLE LOGIN --------------------
 GOOGLE_CLIENT_ID = st.secrets["GOOGLE_CLIENT_ID"]
 GOOGLE_CLIENT_SECRET = st.secrets["GOOGLE_CLIENT_SECRET"]
 GOOGLE_REDIRECT_URI = st.secrets["GOOGLE_REDIRECT_URI"]
@@ -155,8 +122,7 @@ def google_login():
     )
 
     auth_url, _ = flow.authorization_url(prompt="consent")
-
-    st.markdown(f"[👉 Click here to Login with Google]({auth_url})")
+    st.markdown(f"[👉 Login with Google]({auth_url})")
 
 
 # -------------------- LOGIN UI --------------------
@@ -177,12 +143,12 @@ if not st.session_state.authenticated:
                 st.session_state.user_id = user.uid
                 st.session_state.email = email
                 st.rerun()
-                st.divider()
-                st.subheader("Or login with Google")
-
-google_login()
             else:
                 st.error("User not found")
+
+        st.divider()
+        st.subheader("Or login with Google")
+        google_login()
 
     with tab2:
         new_email = st.text_input("New Email")
@@ -206,12 +172,7 @@ if st.sidebar.button("Logout", key="logout_btn"):
         st.session_state[k] = defaults[k]
     st.rerun()
 
-mode = st.sidebar.radio(
-    "Mode",
-    ["📘 PDF Analyzer", "🖼 Image Q&A"],
-    key="mode_radio"
-)
-
+mode = st.sidebar.radio("Mode", ["📘 PDF Analyzer", "🖼 Image Q&A"])
 st.session_state.mode = "PDF" if "PDF" in mode else "IMAGE"
 
 st.sidebar.markdown("## 💬 Your Chats")
@@ -248,45 +209,32 @@ def load_blip():
 
 
 # -------------------- MAIN CONTENT --------------------
-
 if st.session_state.current_chat_id:
 
-    # -------- PDF MODE --------
     if st.session_state.mode == "PDF":
-
         st.title("📘 PDF Analyzer")
-
         pdf = st.file_uploader("Upload PDF", type="pdf")
 
         if pdf and st.session_state.vector_db is None:
             with st.spinner("Processing PDF..."):
                 reader = PdfReader(pdf)
                 text = ""
-
                 for page in reader.pages:
                     extracted = page.extract_text()
                     if extracted:
                         text += extracted + "\n"
 
-                splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=800,
-                    chunk_overlap=150
-                )
-
+                splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
                 chunks = splitter.split_text(text)
                 embeddings = HuggingFaceEmbeddings(
                     model_name="sentence-transformers/all-MiniLM-L6-v2"
                 )
-
                 st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
 
-    # -------- IMAGE MODE --------
-    if st.session_state.mode == "IMAGE":
-
+    else:
         st.title("🖼 Image Q&A")
         img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
 
-    # -------- LOAD MESSAGES --------
     messages = load_messages(
         st.session_state.user_id,
         st.session_state.current_chat_id
@@ -294,11 +242,10 @@ if st.session_state.current_chat_id:
 
     for role, content in messages:
         if role == "user":
-            st.markdown(f'<div class="chat-user">🧑 {content}</div>', unsafe_allow_html=True)
+            st.markdown(f"🧑 **You:** {content}")
         else:
-            st.markdown(f'<div class="chat-ai">🤖 {content}</div>', unsafe_allow_html=True)
+            st.markdown(f"🤖 **AI:** {content}")
 
-    # -------- CHAT INPUT --------
     question = st.chat_input("Ask something...")
 
     if question:
@@ -310,7 +257,6 @@ if st.session_state.current_chat_id:
             question
         )
 
-        # PDF Answer
         if st.session_state.mode == "PDF":
             if st.session_state.vector_db is None:
                 answer = "Please upload a PDF first."
@@ -339,7 +285,6 @@ Information not found in document.
                 answer = result.get("output_text", "") \
                     if isinstance(result, dict) else result
 
-        # Image Answer
         else:
             if not img_file:
                 answer = "Please upload an image first."
