@@ -3,7 +3,7 @@ from datetime import datetime
 import uuid
 from PyPDF2 import PdfReader
 from PIL import Image
-import torch
+import io
 
 # Firebase
 import firebase_admin
@@ -16,7 +16,7 @@ from langchain_community.vectorstores import FAISS
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
-from transformers import BlipProcessor, BlipForQuestionAnswering
+from langchain_core.messages import HumanMessage
 
 
 # -------------------- PAGE CONFIG --------------------
@@ -46,7 +46,7 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 
-# -------------------- FIREBASE AUTH --------------------
+# -------------------- AUTH --------------------
 def signup(email, password):
     try:
         return auth.create_user(email=email, password=password)
@@ -61,7 +61,7 @@ def login(email):
         return None
 
 
-# -------------------- FIRESTORE CHAT STRUCTURE --------------------
+# -------------------- FIRESTORE --------------------
 def create_new_chat(user_id, mode):
     chat_id = str(uuid.uuid4())
     db.collection("users").document(user_id).collection("chats").document(chat_id).set({
@@ -133,9 +133,9 @@ if not st.session_state.authenticated:
 
 
 # -------------------- SIDEBAR --------------------
-st.sidebar.success(f"Logged in as {st.session_state.email}")
+st.sidebar.success(f"👤 {st.session_state.email}")
 
-if st.sidebar.button("Logout"):
+if st.sidebar.button("🚪 Logout"):
     for k in defaults:
         st.session_state[k] = defaults[k]
     st.rerun()
@@ -148,8 +148,20 @@ st.sidebar.markdown("## 💬 Your Chats")
 user_chats = load_user_chats(st.session_state.user_id, st.session_state.mode)
 
 for chat_id, title in user_chats:
-    if st.sidebar.button(title, key=chat_id):
+    col1, col2 = st.sidebar.columns([4, 1])
+    icon = "📘" if st.session_state.mode == "PDF" else "🖼"
+
+    if col1.button(f"{icon} {title}", key=f"open_{chat_id}"):
         st.session_state.current_chat_id = chat_id
+        st.rerun()
+
+    if col2.button("🗑", key=f"delete_{chat_id}"):
+        db.collection("users").document(st.session_state.user_id) \
+          .collection("chats").document(chat_id).delete()
+
+        if st.session_state.current_chat_id == chat_id:
+            st.session_state.current_chat_id = None
+
         st.rerun()
 
 if st.sidebar.button("➕ New Chat"):
@@ -168,20 +180,18 @@ def load_llm():
     )
 
 
-@st.cache_resource
-def load_blip():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    processor = BlipProcessor.from_pretrained("Salesforce/blip-vqa-base")
-    model = BlipForQuestionAnswering.from_pretrained("Salesforce/blip-vqa-base").to(device)
-    return processor, model, device
-
-
 # -------------------- MAIN CONTENT --------------------
-if st.session_state.current_chat_id:
+if not st.session_state.current_chat_id:
+
+    st.markdown("## 👋 Welcome to SlideSense AI")
+    st.markdown("### 🚀 AI Powered PDF & Image Analyzer")
+    st.info("Select 'New Chat' from the sidebar to begin.")
+
+else:
 
     if st.session_state.mode == "PDF":
 
-        st.title("📘 PDF Analyzer")
+        st.markdown("## 📘 PDF Analyzer")
         pdf = st.file_uploader("Upload PDF", type="pdf")
 
         if pdf and st.session_state.vector_db is None:
@@ -206,9 +216,15 @@ if st.session_state.current_chat_id:
             st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
 
     else:
-        st.title("🖼 Image Q&A")
+
+        st.markdown("## 🖼 Image Question Answering")
         img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
 
+        if img_file:
+            image = Image.open(img_file).convert("RGB")
+            st.image(image, use_column_width=True)
+
+    # -------------------- LOAD MESSAGES --------------------
     messages = load_messages(
         st.session_state.user_id,
         st.session_state.current_chat_id
@@ -259,42 +275,38 @@ Information not found in document.
 
                 answer = result.get("output_text", "") if isinstance(result, dict) else result
 
+        # -------- IMAGE ANSWER (Gemini Vision Only) --------
         else:
-    if not img_file:
-        answer = "Please upload an image first."
-    else:
-        with st.spinner("Analyzing image..."):
+            if not img_file:
+                answer = "Please upload an image first."
+            else:
+                llm = load_llm()
 
-            processor, model, device = load_blip()
-            llm = load_llm()
+                image_bytes = img_file.getvalue()
 
-            img = Image.open(img_file).convert("RGB")
+                response = llm.invoke(
+                    [
+                        HumanMessage(
+                            content=[
+                                {"type": "text", "text": question},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{image_bytes.hex()}"
+                                    },
+                                },
+                            ]
+                        )
+                    ]
+                )
 
-            # ---- BLIP (short answer, faster) ----
-            inputs = processor(img, question, return_tensors="pt").to(device)
-            outputs = model.generate(
-                **inputs,
-                max_length=15,      # smaller = faster
-                num_beams=1         # remove beam search for speed
-            )
+                answer = response.content
 
-            short_answer = processor.decode(
-                outputs[0],
-                skip_special_tokens=True
-            )
+        save_message(
+            st.session_state.user_id,
+            st.session_state.current_chat_id,
+            "assistant",
+            answer
+        )
 
-            # ---- Gemini Expansion (short response) ----
-            detailed_prompt = f"""
-Question: {question}
-Visual Info: {short_answer}
-
-Give a clear explanation in 3-4 sentences only.
-"""
-
-            gemini_response = llm.invoke(detailed_prompt)
-
-            answer = gemini_response.content if hasattr(
-                gemini_response, "content") else str(gemini_response)
-
-else:
-    st.title("🚀 Start a New Chat from Sidebar")
+        st.rerun()
