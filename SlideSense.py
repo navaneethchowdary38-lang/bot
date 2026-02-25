@@ -309,25 +309,41 @@ Information not found in document.
                 answer = result.get("output_text", "") \
                     if isinstance(result, dict) else result
 
-        # Image Answer
+       # Image Answer (BLIP + Gemini Combined)
+else:
+    if not img_file:
+        answer = "Please upload an image first."
+    else:
+        processor, model, device = load_blip()
+        llm = load_llm()
+
+        img = Image.open(img_file).convert("RGB")
+
+        # Step 1: Get short visual answer from BLIP
+        inputs = processor(img, question, return_tensors="pt").to(device)
+        outputs = model.generate(**inputs, max_length=30)
+        short_answer = processor.decode(outputs[0], skip_special_tokens=True)
+
+        # Step 2: Send BLIP answer to Gemini for detailed explanation
+        detailed_prompt = f"""
+You are an AI image analyst.
+
+User Question:
+{question}
+
+BLIP Visual Answer:
+{short_answer}
+
+Based on the visual understanding, provide a detailed explanation in 5-7 sentences.
+If possible, describe objects, actions, colors, and context clearly.
+"""
+
+        gemini_response = llm.invoke(detailed_prompt)
+
+        if hasattr(gemini_response, "content"):
+            answer = gemini_response.content
         else:
-            if not img_file:
-                answer = "Please upload an image first."
-            else:
-                processor, model, device = load_blip()
-                img = Image.open(img_file).convert("RGB")
-                inputs = processor(img, question, return_tensors="pt").to(device)
-                outputs = model.generate(**inputs, max_length=30)
-                answer = processor.decode(outputs[0], skip_special_tokens=True)
-
-        save_message(
-            st.session_state.user_id,
-            st.session_state.current_chat_id,
-            "assistant",
-            answer
-        )
-
-        st.rerun()
+            answer = str(gemini_response)
 
 else:
     st.title("🚀 Start a New Chat from Sidebar")
